@@ -1,0 +1,40 @@
+# homeFinance — never commit user data or secrets
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# Local DB / config (the engine resolves these to ~/.homefinance/ or XDG paths,
+# but if anyone runs it from inside the repo, prevent accidents)
+.homefinance/
+*.sqlite
+*.sqlite3
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
