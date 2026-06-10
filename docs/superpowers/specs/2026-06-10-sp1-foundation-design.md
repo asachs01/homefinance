@@ -214,6 +214,7 @@ CREATE TABLE accounts (
     type                     TEXT NOT NULL,            -- canonical: checking | savings | credit_card | investment | loan | cash | other
     on_budget                INTEGER NOT NULL DEFAULT 1,
     closed                   INTEGER NOT NULL DEFAULT 0,
+    deleted                  INTEGER NOT NULL DEFAULT 0,
     currency                 TEXT NOT NULL DEFAULT 'USD',
     cleared_balance_minor    INTEGER,                  -- as reported by source
     uncleared_balance_minor  INTEGER,                  -- as reported by source
@@ -228,7 +229,8 @@ CREATE TABLE categories (
     external_id  TEXT NOT NULL,
     name         TEXT NOT NULL,
     group_name   TEXT,                                 -- YNAB's category group
-    hidden       INTEGER NOT NULL DEFAULT 0,
+    hidden       INTEGER NOT NULL DEFAULT 0,           -- user-archived
+    deleted      INTEGER NOT NULL DEFAULT 0,           -- removed from budget
     UNIQUE (source_id, external_id)
 );
 
@@ -259,7 +261,8 @@ CREATE TABLE transactions (
     flag_color             TEXT,
     import_id              TEXT,                       -- YNAB's bank-import dedup key
     transfer_account_id    TEXT REFERENCES accounts(id),
-    parent_id              TEXT REFERENCES transactions(id),  -- split parent (NULL for non-splits and split parents themselves)
+    parent_id              TEXT REFERENCES transactions(id),  -- references the split parent; NULL for non-splits and for split parents themselves
+    is_split_parent        INTEGER NOT NULL DEFAULT 0, -- 1 iff this row is the parent of a split (has children); set at mapping time
     deleted                INTEGER NOT NULL DEFAULT 0,
     raw                    TEXT,                       -- JSON: original payload, for debug/audit
     synced_at              TEXT NOT NULL,
@@ -303,20 +306,21 @@ CREATE INDEX idx_sync_runs_source_time     ON sync_runs(source_id, started_at);
 
 ### 6.3 Split transactions
 
-YNAB splits are modeled as **parent + children rows linked by `parent_id`**:
+YNAB splits are modeled as **parent + children rows linked by `parent_id`**, with an `is_split_parent` flag set at mapping time so that the two analytical views are filterable without subqueries:
 
-- The parent row carries the aggregate amount and (typically) no category.
-- Each child row carries one category and a partial amount; children sum to the parent's amount.
-- Both parent and children share a `(source_id, external_id)` family in YNAB's data; we preserve the parent's transaction ID and assign deterministic child IDs (`<parent_id>:sub:<n>`).
+- The parent row carries the aggregate amount, typically no category, and `is_split_parent = 1`.
+- Each child row carries one category, a partial amount, `parent_id = <parent's id>`, and `is_split_parent = 0`. Children sum to the parent's amount.
+- The parent uses YNAB's transaction ID; children get deterministic IDs (`<parent_id>:sub:<n>`).
+- A non-split transaction has `parent_id = NULL` and `is_split_parent = 0`.
 
-Analytical queries follow exactly one of two disciplines — never both, or amounts double-count:
+Every analytical query picks **exactly one** of the two views below — never mixes — or amounts double-count:
 
-| Discipline | Use for | SQL filter |
-|---|---|---|
-| **Parent-only** | Totals (cash flow, account-level sums) | `WHERE parent_id IS NULL` |
-| **Children-only for split parents** | Category breakdowns | exclude split *parents* (where children exist); include all non-split rows |
+| View | Use for | SQL filter | What it returns |
+|---|---|---|---|
+| **Tops** (the user-facing "one transaction" view) | Total cash flow; account-level sums; "list my transactions" | `WHERE parent_id IS NULL` | Non-split rows + split parents |
+| **Leaves** (the analysis view) | Category breakdowns; payee aggregations; any category-aware query | `WHERE is_split_parent = 0` | Non-split rows + split children |
 
-The `summarize_spending` MCP tool encodes this discipline in code (see §8.2).
+Both views sum to the same totals (because parents = sum of children) — they just give different lenses on the data. The `summarize_spending` MCP tool always operates on the **leaves** view so category attribution is correct; `query_transactions` exposes a `mode` parameter (default: `leaves`) to let callers choose.
 
 ### 6.4 Balance reconciliation
 
@@ -368,19 +372,23 @@ A single function — `run_sync(source_id)` in `src/homefinance/sources/ynab/syn
 INSERT INTO transactions (id, source_id, external_id, account_id, date, amount_minor, ...)
 VALUES (?, ?, ?, ?, ?, ?, ...)
 ON CONFLICT (source_id, external_id) DO UPDATE SET
-    date         = excluded.date,
-    amount_minor = excluded.amount_minor,
-    payee        = excluded.payee,
-    payee_id     = excluded.payee_id,
-    memo         = excluded.memo,
-    category_id  = excluded.category_id,
-    cleared      = excluded.cleared,
-    approved     = excluded.approved,
-    flag_color   = excluded.flag_color,
-    deleted      = excluded.deleted,
-    raw          = excluded.raw,
-    synced_at    = excluded.synced_at;
+    date                = excluded.date,
+    amount_minor        = excluded.amount_minor,
+    payee               = excluded.payee,
+    payee_id            = excluded.payee_id,
+    memo                = excluded.memo,
+    category_id         = excluded.category_id,
+    cleared             = excluded.cleared,
+    approved            = excluded.approved,
+    flag_color          = excluded.flag_color,
+    transfer_account_id = excluded.transfer_account_id,
+    is_split_parent     = excluded.is_split_parent,
+    deleted             = excluded.deleted,
+    raw                 = excluded.raw,
+    synced_at           = excluded.synced_at;
 ```
+
+The rule: **`ON CONFLICT DO UPDATE` covers every mutable column** — only the identifying triple (`id`, `source_id`, `external_id`) is excluded. The same pattern (with each table's column set) applies to `accounts`, `categories`, and `payees`.
 
 The same pattern applies to `accounts`, `categories`, and `payees`. Soft-delete: when YNAB returns `deleted: true` in a delta, we set `deleted = 1` rather than removing the row. The audit trail is preserved and the model matches YNAB's.
 
@@ -429,8 +437,8 @@ Exception to "no convenience tools": aggregation primitives that encode a *corre
 | `list_accounts` | `(source_id?: str, include_closed?: bool=False) -> Account[]` | Accounts across or within budgets; budget nickname for disambiguation |
 | `get_account` | `(account_id: str) -> AccountDetail` | Single account + latest reconciliation status |
 | `list_categories` | `(source_id?: str, include_hidden?: bool=False) -> Category[]` | Categories per source |
-| `query_transactions` | `(filters: TxFilters) -> Transaction[]` | Workhorse. Filters: account/source/date/category/payee/amount/cleared/include_deleted/limit/offset. **Excludes split parents by default** (`parent_id IS NULL`); set `include_splits=True` to include children. |
-| `summarize_spending` | `(filters: TxFilters, group_by: 'category'\|'payee'\|'month'\|'account'\|'day_of_week') -> Bucket[]` | Server-side aggregation that automatically applies the correct split-handling rule per `group_by` (see §6.3). |
+| `query_transactions` | `(filters: TxFilters, mode: 'leaves'\|'tops' = 'leaves') -> Transaction[]` | Workhorse. Filters: account/source/date/category/payee/amount/cleared/include_deleted/limit/offset. `mode='leaves'` (default) = non-split rows + split children (analysis view, correct category attribution). `mode='tops'` = non-split rows + split parents (user-facing "one transaction" view). See §6.3. |
+| `summarize_spending` | `(filters: TxFilters, group_by: 'category'\|'payee'\|'month'\|'account'\|'day_of_week') -> Bucket[]` | Server-side aggregation. Always operates on the **leaves** view (§6.3) so totals and category attribution are simultaneously correct. Encodes the split-handling discipline in code so callers cannot accidentally double-count. |
 | `get_sync_status` | `() -> SyncStatus` | Last-sync per source + drift summary |
 | `sync_ynab` | `(source_id?: str) -> SyncRunRow` | Triggers `run_sync()`. Defaults to all YNAB sources. Returns counts + reconciliation outcome. |
 
