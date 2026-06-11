@@ -15,7 +15,7 @@ Open-source, local-first home financial analysis — distributed as a Claude Cod
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/asachs/homefinance.git
+git clone https://github.com/asachs01/homefinance.git
 cd homefinance
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

@@ -7,7 +7,7 @@ A 10-minute walkthrough from clone to first analysis.
 Python 3.11+ is required.
 
 ```bash
-git clone https://github.com/asachs/homefinance.git
+git clone https://github.com/asachs01/homefinance.git
 cd homefinance
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
