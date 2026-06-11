@@ -6,13 +6,19 @@ and the ``ynab`` subcommands land in Tasks 18-20.
 
 from __future__ import annotations
 
+from typing import cast
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from homefinance.config import load_config
+from homefinance.config import YNABBudget, load_config
+from homefinance.db.migrate import migrate
 from homefinance.db.store import Store
+from homefinance.sources.base import AccountSource
 from homefinance.sources.ynab.client import YNABClient
+from homefinance.sources.ynab.source import YNABAccountSource
+from homefinance.sources.ynab.sync import run_sync
 
 app = typer.Typer(
     help="homefinance — open-source, local-first home financial analysis.",
@@ -26,6 +32,25 @@ err_console = Console(stderr=True)
 def _make_client(token: str) -> YNABClient:
     """Factory so tests can monkeypatch in a FakeYNABClient."""
     return YNABClient(token=token)
+
+
+def _toml_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _render_config_toml(budgets: list[YNABBudget], include_token: str | None) -> str:
+    lines: list[str] = []
+    if include_token:
+        lines += ["[ynab]", f'token = "{_toml_escape(include_token)}"', ""]
+    for b in budgets:
+        lines += [
+            "[[ynab.budgets]]",
+            f'budget_id = "{_toml_escape(b.budget_id)}"',
+        ]
+        if b.nickname:
+            lines.append(f'nickname = "{_toml_escape(b.nickname)}"')
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 @app.command("db-path")
@@ -79,13 +104,92 @@ def status() -> None:
     console.print(table)
 
 
-# Placeholders for Tasks 18-20 so `homefinance --help` lists them; the actual
-# implementations replace these in later tasks.
-
 @app.command()
-def init() -> None:
-    """Interactive first-run setup. Implemented in Task 18."""
-    raise typer.Exit(code=2)  # placeholder; tests in Task 18 cover real behavior
+def init(
+    token: str | None = typer.Option(
+        None, "--token",
+        envvar="HOMEFINANCE_YNAB_TOKEN",
+        help="YNAB Personal Access Token. If omitted, prompted interactively.",
+    ),
+    budget_ids: list[str] | None = typer.Option(  # noqa: B008
+        None, "--budget", "-b",
+        help="Budget IDs to track. May be repeated. If omitted, prompted.",
+    ),
+    nicknames: list[str] | None = typer.Option(  # noqa: B008
+        None, "--nickname", "-n",
+        help="Nicknames matching --budget order. Defaults to budget name slug.",
+    ),
+    no_sync: bool = typer.Option(
+        False, "--no-sync", help="Skip the post-setup sync."
+    ),
+    save_token_to_file: bool = typer.Option(
+        False, "--save-token-to-file",
+        help="Persist the token to config.toml (default: keep it in env only).",
+    ),
+) -> None:
+    """First-run setup: write config, register budgets, migrate DB, optionally sync."""
+    cfg = load_config()
+    cfg.config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. Resolve token (prompt only if neither flag nor env supplied it).
+    effective_token = token
+    if effective_token is None:
+        effective_token = typer.prompt("YNAB Personal Access Token", hide_input=True)
+
+    client = _make_client(effective_token)
+    available = client.get_budgets().data.budgets
+    if not available:
+        err_console.print("[red]No YNAB budgets found for this token.[/]")
+        raise typer.Exit(code=1)
+
+    # 2. Pick budgets.
+    if not budget_ids:
+        console.print("Available budgets:")
+        for i, b in enumerate(available):
+            console.print(f"  [{i}] {b.name}  ({b.id})")
+        raw = typer.prompt("Comma-separated indices to track", default="0")
+        try:
+            idx = [int(x.strip()) for x in raw.split(",")]
+            budget_ids = [available[i].id for i in idx]
+        except (ValueError, IndexError):
+            err_console.print("[red]Invalid selection.[/]")
+            raise typer.Exit(code=1) from None
+
+    if nicknames and len(nicknames) != len(budget_ids):
+        err_console.print("[red]--nickname count must match --budget count.[/]")
+        raise typer.Exit(code=1)
+
+    by_id = {b.id: b for b in available}
+    selected: list[YNABBudget] = []
+    for i, bid in enumerate(budget_ids):
+        if bid not in by_id:
+            err_console.print(f"[red]Budget {bid!r} not found in this YNAB account.[/]")
+            raise typer.Exit(code=1)
+        nick = nicknames[i] if nicknames else by_id[bid].name.lower().replace(" ", "-")
+        selected.append(YNABBudget(budget_id=bid, nickname=nick))
+
+    # 3. Write config + migrate.
+    toml = _render_config_toml(
+        selected, include_token=effective_token if save_token_to_file else None
+    )
+    cfg.config_path.write_text(toml)
+    migrate(cfg.db_path)
+    console.print(f"[green]Config written:[/] {cfg.config_path}")
+    console.print(f"[green]Database ready:[/] {cfg.db_path}")
+
+    if no_sync:
+        return
+
+    # 4. First sync per budget.
+    store = Store.open(cfg.db_path)
+    for sb in selected:
+        source = YNABAccountSource(sb.budget_id, client, nickname=sb.nickname)
+        result = run_sync(cast(AccountSource, source), store)
+        console.print(
+            f"[green]Synced[/] {sb.nickname}: "
+            f"{result.txns_inserted} new, {result.txns_updated} updated, "
+            f"{result.txns_deleted} deleted; reconciliation={result.reconciliation}"
+        )
 
 
 @app.command()

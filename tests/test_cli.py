@@ -46,3 +46,44 @@ def test_status_lists_configured_sources(env: Path) -> None:
     assert result.exit_code == 0
     assert "ynab:abc" in result.stdout
     assert "personal" in result.stdout
+
+
+from homefinance.sources.ynab.fake_client import FakeYNABClient  # noqa: E402
+
+
+def _patch_client(monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path) -> None:
+    monkeypatch.setattr(
+        "homefinance.cli._make_client", lambda token: FakeYNABClient(fixtures_dir)
+    )
+
+
+def test_init_writes_config_and_migrates_db(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    result = runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    assert result.exit_code == 0, result.stdout
+    cfg = (env / "config.toml").read_text()
+    assert 'budget_id = "budget-tiny"' in cfg
+    assert 'nickname = "tiny"' in cfg
+    assert (env / "db.sqlite3").exists()
+
+
+def test_init_runs_first_sync_unless_no_sync(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    result = runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "3 new" in result.stdout or "synced" in result.stdout.lower()
+
+    import sqlite3
+    with sqlite3.connect(env / "db.sqlite3") as conn:
+        n = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    assert n >= 3  # parent split counts; children add more
