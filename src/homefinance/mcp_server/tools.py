@@ -1,4 +1,92 @@
 """MCP tool implementations as plain functions. The stdio server wraps these
-with ``@mcp.tool()`` decorators in ``__main__.py``. Defined as functions (not
-decorators) so tests can call them directly without spinning up the MCP runtime.
+with ``@mcp.tool()`` decorators in ``__main__.py``.
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+from homefinance.db.store import Store
+
+
+def _row_to_dict(row: Any) -> dict[str, Any]:
+    return {k: row[k] for k in row.keys()}  # noqa: SIM118 — sqlite3.Row needs .keys()
+
+
+# ---------------------------------------------------------------------------
+# Sources
+
+
+def list_sources(store: Store) -> list[dict[str, Any]]:
+    """List registered budgets + last-sync info."""
+    rows = store.execute(
+        "SELECT s.id AS source_id, s.kind, s.nickname, "
+        "ss.last_sync_at, ss.server_knowledge, "
+        "(SELECT reconciliation FROM sync_runs WHERE source_id = s.id "
+        " ORDER BY id DESC LIMIT 1) AS last_reconciliation "
+        "FROM sources s LEFT JOIN sync_state ss ON ss.source_id = s.id "
+        "ORDER BY s.id"
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+
+
+def list_accounts(
+    store: Store, source_id: str | None = None, include_closed: bool = False
+) -> list[dict[str, Any]]:
+    where: list[str] = ["deleted = 0"]
+    params: list[Any] = []
+    if source_id is not None:
+        where.append("source_id = ?")
+        params.append(source_id)
+    if not include_closed:
+        where.append("closed = 0")
+    sql = (
+        "SELECT id, source_id, external_id, name, type, on_budget, closed, "
+        "currency, cleared_balance_minor, uncleared_balance_minor, balance_as_of "
+        "FROM accounts WHERE " + " AND ".join(where) + " ORDER BY name"
+    )
+    return [_row_to_dict(r) for r in store.execute(sql, params).fetchall()]
+
+
+def get_account(store: Store, account_id: str) -> dict[str, Any]:
+    row = store.execute(
+        "SELECT id, source_id, external_id, name, type, on_budget, closed, "
+        "currency, cleared_balance_minor, uncleared_balance_minor, balance_as_of, "
+        "last_synced_at "
+        "FROM accounts WHERE id = ?",
+        (account_id,),
+    ).fetchone()
+    if row is None:
+        raise KeyError(f"account {account_id!r} not found")
+    result = _row_to_dict(row)
+    recon = store.execute(
+        "SELECT reconciliation FROM sync_runs WHERE source_id = ? ORDER BY id DESC LIMIT 1",
+        (result["source_id"],),
+    ).fetchone()
+    result["reconciliation"] = recon["reconciliation"] if recon else None
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Categories
+
+
+def list_categories(
+    store: Store, source_id: str | None = None, include_hidden: bool = False
+) -> list[dict[str, Any]]:
+    where: list[str] = ["deleted = 0"]
+    params: list[Any] = []
+    if source_id is not None:
+        where.append("source_id = ?")
+        params.append(source_id)
+    if not include_hidden:
+        where.append("hidden = 0")
+    sql = (
+        "SELECT id, source_id, external_id, name, group_name "
+        "FROM categories WHERE " + " AND ".join(where) + " ORDER BY group_name, name"
+    )
+    return [_row_to_dict(r) for r in store.execute(sql, params).fetchall()]
