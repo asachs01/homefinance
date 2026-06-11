@@ -102,5 +102,28 @@ def query_transactions(
     )
 
 
+@mcp.tool()
+def summarize_spending(
+    source_id: str | None = None,
+    account_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    payee_contains: str | None = None,
+    cleared: str | None = None,
+    group_by: str = "category",
+) -> list[dict]:  # type: ignore[type-arg]
+    """Aggregate spending. ``group_by ∈ {category, payee, month, account, day_of_week}``."""
+    return _tools.summarize_spending(
+        _store_cached(),
+        source_id=source_id,
+        account_id=account_id,
+        date_from=date_from,
+        date_to=date_to,
+        payee_contains=payee_contains,
+        cleared=cleared,
+        group_by=group_by,  # type: ignore[arg-type]
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     mcp.run()

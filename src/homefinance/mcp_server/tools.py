@@ -169,3 +169,72 @@ def query_transactions(
     )
     params.extend([limit, offset])
     return [_row_to_dict(r) for r in store.execute(sql, params).fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Aggregations
+
+
+GroupBy = Literal["category", "payee", "month", "account", "day_of_week"]
+
+
+_GROUP_EXPR: dict[str, str] = {
+    "category": "COALESCE(c.name, '(uncategorized)')",
+    "payee": "COALESCE(t.payee, '(no payee)')",
+    "month": "substr(t.date, 1, 7)",
+    "account": "a.name",
+    "day_of_week": "CAST(strftime('%w', t.date) AS INTEGER)",
+}
+
+
+def summarize_spending(
+    store: Store,
+    source_id: str | None = None,
+    account_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    payee_contains: str | None = None,
+    cleared: str | None = None,
+    group_by: GroupBy = "category",
+) -> list[dict[str, Any]]:
+    """Aggregate spending. Always operates on the Leaves view (is_split_parent = 0,
+    deleted = 0) so totals + category attribution are simultaneously correct.
+    """
+    expr = _GROUP_EXPR.get(group_by)
+    if expr is None:
+        raise ValueError(f"invalid group_by: {group_by!r}")
+
+    where: list[str] = ["t.is_split_parent = 0", "t.deleted = 0"]
+    params: list[Any] = []
+
+    if source_id is not None:
+        where.append("t.source_id = ?")
+        params.append(source_id)
+    if account_id is not None:
+        where.append("t.account_id = ?")
+        params.append(account_id)
+    if date_from is not None:
+        where.append("t.date >= ?")
+        params.append(date_from)
+    if date_to is not None:
+        where.append("t.date <= ?")
+        params.append(date_to)
+    if payee_contains is not None:
+        where.append("t.payee LIKE ?")
+        params.append(f"%{payee_contains}%")
+    if cleared is not None:
+        where.append("t.cleared = ?")
+        params.append(cleared)
+
+    sql = (
+        f"SELECT {expr} AS key, SUM(t.amount_minor) AS total_minor, "
+        "COUNT(*) AS count "
+        "FROM transactions t "
+        "LEFT JOIN accounts a ON a.id = t.account_id "
+        "LEFT JOIN categories c ON c.id = t.category_id "
+        "WHERE " + " AND ".join(where) + f" GROUP BY {expr} ORDER BY total_minor"
+    )
+    return [
+        {"key": r["key"], "total_minor": int(r["total_minor"]), "count": int(r["count"])}
+        for r in store.execute(sql, params).fetchall()
+    ]

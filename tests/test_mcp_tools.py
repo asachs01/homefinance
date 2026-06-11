@@ -9,6 +9,7 @@ from homefinance.mcp_server.tools import (
     list_categories,
     list_sources,
     query_transactions,
+    summarize_spending,
 )
 from homefinance.sources.ynab.fake_client import FakeYNABClient
 from homefinance.sources.ynab.source import YNABAccountSource
@@ -120,3 +121,34 @@ def test_query_transactions_limit_and_offset(synced_store: Store) -> None:
     page2 = query_transactions(synced_store, limit=1, offset=1)
     assert len(page1) == 1 and len(page2) == 1
     assert page1[0]["id"] != page2[0]["id"]
+
+
+def test_summarize_by_category_uses_leaves_view(synced_store: Store) -> None:
+    rows = summarize_spending(synced_store, group_by="category")
+    by_key = {r["key"]: r for r in rows}
+    # YNAB milliunits → minor (cents): non-split groceries -4567, split gas
+    # -4000, split groceries -1000. Leaves groceries total = -4567 + -1000.
+    assert by_key["Groceries"]["total_minor"] == -5567
+    assert by_key["Gas"]["total_minor"] == -4000
+
+
+def test_summarize_by_month(synced_store: Store) -> None:
+    rows = summarize_spending(synced_store, group_by="month")
+    assert any(r["key"] == "2026-06" for r in rows)
+
+
+def test_summarize_by_account(synced_store: Store) -> None:
+    rows = summarize_spending(synced_store, group_by="account")
+    by_key = {r["key"]: r for r in rows}
+    assert "Checking" in by_key
+    assert by_key["Checking"]["count"] > 0
+
+
+def test_summarize_by_payee(synced_store: Store) -> None:
+    rows = summarize_spending(synced_store, group_by="payee")
+    assert any(r["key"] == "Trader Joe's" for r in rows)
+
+
+def test_summarize_invalid_group_by_raises(synced_store: Store) -> None:
+    with pytest.raises(ValueError):
+        summarize_spending(synced_store, group_by="banana")
