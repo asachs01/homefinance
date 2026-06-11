@@ -6,6 +6,9 @@ and the ``ynab`` subcommands land in Tasks 18-20.
 
 from __future__ import annotations
 
+import contextlib
+import os
+from pathlib import Path
 from typing import cast
 
 import typer
@@ -36,6 +39,24 @@ def _make_client(token: str) -> YNABClient:
 
 def _toml_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _secure_write_config(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` with file mode 0o600 and parent dir 0o700.
+
+    Creates parents as needed; tightens permissions on existing parent dirs.
+    Used for any file that may contain credentials (currently the YNAB
+    config TOML).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Tighten permissions on the parent directory (idempotent; does nothing
+    # if already 0o700 or stricter). Best-effort on systems that don't
+    # support chmod (e.g., Windows).
+    with contextlib.suppress(OSError):
+        os.chmod(path.parent, 0o700)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
 
 
 def _render_config_toml(budgets: list[YNABBudget], include_token: str | None) -> str:
@@ -129,7 +150,6 @@ def init(
 ) -> None:
     """First-run setup: write config, register budgets, migrate DB, optionally sync."""
     cfg = load_config()
-    cfg.config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Resolve token (prompt only if neither flag nor env supplied it).
     effective_token = token
@@ -172,7 +192,7 @@ def init(
     toml = _render_config_toml(
         selected, include_token=effective_token if save_token_to_file else None
     )
-    cfg.config_path.write_text(toml)
+    _secure_write_config(cfg.config_path, toml)
     migrate(cfg.db_path)
     console.print(f"[green]Config written:[/] {cfg.config_path}")
     console.print(f"[green]Database ready:[/] {cfg.db_path}")

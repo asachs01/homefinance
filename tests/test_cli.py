@@ -72,6 +72,22 @@ def test_init_writes_config_and_migrates_db(
     assert (env / "db.sqlite3").exists()
 
 
+def test_init_writes_config_with_owner_only_permissions(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    result = runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    assert result.exit_code == 0, result.stdout
+    cfg_path = env / "config.toml"
+    mode = cfg_path.stat().st_mode & 0o777
+    assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
+    parent_mode = cfg_path.parent.stat().st_mode & 0o777
+    assert parent_mode == 0o700, f"expected 0o700 on parent, got {oct(parent_mode)}"
+
+
 def test_init_runs_first_sync_unless_no_sync(
     env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
 ) -> None:
