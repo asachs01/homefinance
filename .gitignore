@@ -32,6 +32,11 @@ htmlcov/
 venv/
 env/
 ENV/
+# Stray venv-in-repo bits (from accidental `python -m venv .` in repo root)
+bin/
+lib/
+pyvenv.cfg
+CACHEDIR.TAG
 
 # Editors / OS
 .vscode/
