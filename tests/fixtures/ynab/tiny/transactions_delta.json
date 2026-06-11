@@ -1,0 +1,23 @@
+{
+  "data": {
+    "server_knowledge": 150,
+    "transactions": [
+      {
+        "id": "txn-non-split", "date": "2026-06-01", "amount": -45670,
+        "memo": "weekly shop (corrected memo)", "cleared": "reconciled",
+        "approved": true, "flag_color": null, "account_id": "acct-checking",
+        "payee_id": "payee-trader-joes", "payee_name": "Trader Joe's",
+        "category_id": "cat-groceries", "transfer_account_id": null,
+        "import_id": "YNAB:imp-1", "deleted": false, "subtransactions": []
+      },
+      {
+        "id": "txn-transfer", "date": "2026-06-03", "amount": -20000,
+        "memo": "pay down card", "cleared": "uncleared", "approved": true,
+        "flag_color": null, "account_id": "acct-checking",
+        "payee_id": "payee-xfer-credit", "payee_name": "Transfer : Credit Card",
+        "category_id": null, "transfer_account_id": "acct-credit",
+        "import_id": null, "deleted": true, "subtransactions": []
+      }
+    ]
+  }
+}

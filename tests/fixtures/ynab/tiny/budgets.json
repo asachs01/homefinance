@@ -1,0 +1,7 @@
+{
+  "data": {
+    "budgets": [
+      { "id": "budget-tiny", "name": "Tiny Budget" }
+    ]
+  }
+}

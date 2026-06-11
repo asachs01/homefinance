@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 from pytest_httpx import HTTPXMock
 
 from homefinance.sources.ynab.client import YNABAuthError, YNABClient, YNABClientError
+from homefinance.sources.ynab.fake_client import FakeYNABClient
 
 
 def _client() -> YNABClient:
@@ -61,3 +64,22 @@ def test_persistent_5xx_raises_client_error(httpx_mock: HTTPXMock) -> None:
 def test_client_has_no_write_methods() -> None:
     for attr in ("post", "put", "patch", "delete", "create_transaction", "update_transaction"):
         assert not hasattr(YNABClient, attr), f"YNABClient must not expose {attr!r}"
+
+
+def test_fake_client_parses_tiny_fixtures(tiny_fixtures_dir: Path) -> None:
+    fake = FakeYNABClient(tiny_fixtures_dir)
+    assert fake.get_user().data.user.id == "user-tiny"
+    assert [b.id for b in fake.get_budgets().data.budgets] == ["budget-tiny"]
+    txns = fake.get_transactions("budget-tiny").data.transactions
+    ids = {t.id for t in txns}
+    assert ids == {"txn-non-split", "txn-split", "txn-transfer"}
+    split = next(t for t in txns if t.id == "txn-split")
+    assert sum(s.amount for s in split.subtransactions) == split.amount
+
+
+def test_fake_client_returns_delta_when_cursor_given(tiny_fixtures_dir: Path) -> None:
+    fake = FakeYNABClient(tiny_fixtures_dir)
+    delta = fake.get_transactions("budget-tiny", cursor=100).data.transactions
+    assert {t.id for t in delta} == {"txn-non-split", "txn-transfer"}
+    soft_deleted = next(t for t in delta if t.id == "txn-transfer")
+    assert soft_deleted.deleted is True

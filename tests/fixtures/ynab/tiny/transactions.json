@@ -1,0 +1,39 @@
+{
+  "data": {
+    "server_knowledge": 100,
+    "transactions": [
+      {
+        "id": "txn-non-split", "date": "2026-06-01", "amount": -45670,
+        "memo": "weekly shop", "cleared": "cleared", "approved": true,
+        "flag_color": null, "account_id": "acct-checking",
+        "payee_id": "payee-trader-joes", "payee_name": "Trader Joe's",
+        "category_id": "cat-groceries", "transfer_account_id": null,
+        "import_id": "YNAB:imp-1", "deleted": false, "subtransactions": []
+      },
+      {
+        "id": "txn-split", "date": "2026-06-02", "amount": -50000,
+        "memo": "gas + snacks", "cleared": "cleared", "approved": true,
+        "flag_color": null, "account_id": "acct-checking",
+        "payee_id": "payee-shell", "payee_name": "Shell",
+        "category_id": null, "transfer_account_id": null,
+        "import_id": null, "deleted": false,
+        "subtransactions": [
+          { "id": "sub-1", "amount": -40000, "memo": "gas",
+            "payee_id": "payee-shell", "category_id": "cat-gas",
+            "transfer_account_id": null, "deleted": false },
+          { "id": "sub-2", "amount": -10000, "memo": "snacks",
+            "payee_id": "payee-shell", "category_id": "cat-groceries",
+            "transfer_account_id": null, "deleted": false }
+        ]
+      },
+      {
+        "id": "txn-transfer", "date": "2026-06-03", "amount": -20000,
+        "memo": "pay down card", "cleared": "uncleared", "approved": true,
+        "flag_color": null, "account_id": "acct-checking",
+        "payee_id": "payee-xfer-credit", "payee_name": "Transfer : Credit Card",
+        "category_id": null, "transfer_account_id": "acct-credit",
+        "import_id": null, "deleted": false, "subtransactions": []
+      }
+    ]
+  }
+}

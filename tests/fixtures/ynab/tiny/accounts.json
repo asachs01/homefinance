@@ -1,0 +1,29 @@
+{
+  "data": {
+    "server_knowledge": 100,
+    "accounts": [
+      {
+        "id": "acct-checking",
+        "name": "Checking",
+        "type": "checking",
+        "on_budget": true,
+        "closed": false,
+        "deleted": false,
+        "balance": 1234560,
+        "cleared_balance": 1234560,
+        "uncleared_balance": 0
+      },
+      {
+        "id": "acct-credit",
+        "name": "Credit Card",
+        "type": "creditCard",
+        "on_budget": true,
+        "closed": false,
+        "deleted": false,
+        "balance": -50000,
+        "cleared_balance": -50000,
+        "uncleared_balance": 0
+      }
+    ]
+  }
+}

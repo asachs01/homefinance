@@ -1,0 +1,11 @@
+{
+  "data": {
+    "server_knowledge": 100,
+    "payees": [
+      { "id": "payee-trader-joes", "name": "Trader Joe's", "deleted": false },
+      { "id": "payee-shell", "name": "Shell", "deleted": false },
+      { "id": "payee-xfer-credit", "name": "Transfer : Credit Card",
+        "transfer_account_id": "acct-credit", "deleted": false }
+    ]
+  }
+}

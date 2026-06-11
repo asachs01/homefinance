@@ -1,0 +1,24 @@
+{
+  "data": {
+    "server_knowledge": 100,
+    "category_groups": [
+      {
+        "id": "grp-everyday",
+        "name": "Everyday",
+        "hidden": false,
+        "deleted": false,
+        "categories": [
+          { "id": "cat-groceries", "category_group_id": "grp-everyday",
+            "category_group_name": "Everyday", "name": "Groceries",
+            "hidden": false, "deleted": false },
+          { "id": "cat-dining", "category_group_id": "grp-everyday",
+            "category_group_name": "Everyday", "name": "Dining Out",
+            "hidden": false, "deleted": false },
+          { "id": "cat-gas", "category_group_id": "grp-everyday",
+            "category_group_name": "Everyday", "name": "Gas",
+            "hidden": false, "deleted": false }
+        ]
+      }
+    ]
+  }
+}
