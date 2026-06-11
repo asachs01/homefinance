@@ -136,14 +136,9 @@ from homefinance.sources.ynab.source import (  # noqa: E402
 
 def _ynab_sources(cfg: Config) -> list[_YNABAccountSource]:
     if cfg.ynab_token is None:
-        raise RuntimeError(
-            "No YNAB token configured. Set HOMEFINANCE_YNAB_TOKEN or [ynab].token."
-        )
+        raise RuntimeError("No YNAB token configured. Set HOMEFINANCE_YNAB_TOKEN or [ynab].token.")
     client = _YNABClient(token=cfg.ynab_token.get_secret_value())
-    return [
-        _YNABAccountSource(b.budget_id, client, nickname=b.nickname)
-        for b in cfg.ynab.budgets
-    ]
+    return [_YNABAccountSource(b.budget_id, client, nickname=b.nickname) for b in cfg.ynab.budgets]
 
 
 @mcp.tool()
@@ -161,9 +156,7 @@ def sync_ynab(source_id: str | None = None) -> list[dict]:  # type: ignore[type-
         sources = [s for s in sources if s.source_id == source_id]
         if not sources:
             raise ValueError(f"source {source_id!r} not configured")
-    return _tools.sync_ynab_all(
-        _store_cached(), [_cast(_AccountSource, s) for s in sources]
-    )
+    return _tools.sync_ynab_all(_store_cached(), [_cast(_AccountSource, s) for s in sources])
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -268,28 +268,30 @@ def get_sync_status(store: Store) -> list[dict[str, Any]]:
                 drift_count = len(json.loads(r["last_drift_report"]).get("accounts", []))
             except (json.JSONDecodeError, AttributeError, TypeError):
                 drift_count = 0
-        out.append({
-            "source_id":           r["source_id"],
-            "kind":                r["kind"],
-            "nickname":            r["nickname"],
-            "last_sync_at":        r["last_sync_at"],
-            "server_knowledge":    r["server_knowledge"],
-            "last_reconciliation": r["last_reconciliation"],
-            "drift_account_count": drift_count,
-        })
+        out.append(
+            {
+                "source_id": r["source_id"],
+                "kind": r["kind"],
+                "nickname": r["nickname"],
+                "last_sync_at": r["last_sync_at"],
+                "server_knowledge": r["server_knowledge"],
+                "last_reconciliation": r["last_reconciliation"],
+                "drift_account_count": drift_count,
+            }
+        )
     return out
 
 
 def _result_to_dict(r: SyncRunResult) -> dict[str, Any]:
     return {
-        "source_id":         r.source_id,
-        "status":            r.status,
-        "txns_inserted":     r.txns_inserted,
-        "txns_updated":      r.txns_updated,
-        "txns_deleted":      r.txns_deleted,
-        "accounts_touched":  r.accounts_touched,
-        "reconciliation":    r.reconciliation,
-        "drift_report":      r.drift_report,
+        "source_id": r.source_id,
+        "status": r.status,
+        "txns_inserted": r.txns_inserted,
+        "txns_updated": r.txns_updated,
+        "txns_deleted": r.txns_deleted,
+        "accounts_touched": r.accounts_touched,
+        "reconciliation": r.reconciliation,
+        "drift_report": r.drift_report,
     }
 
 

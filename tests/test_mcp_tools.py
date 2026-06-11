@@ -167,9 +167,7 @@ def test_get_sync_status_returns_per_source_summary(synced_store: Store) -> None
     assert "drift_account_count" in r
 
 
-def test_sync_ynab_all_runs_for_each_budget(
-    store: Store, tiny_fixtures_dir: Path
-) -> None:
+def test_sync_ynab_all_runs_for_each_budget(store: Store, tiny_fixtures_dir: Path) -> None:
     fake = FakeYNABClient(tiny_fixtures_dir)
     sources = [YNABAccountSource("budget-tiny", fake, nickname="tiny")]
     results = sync_ynab_all(store, sources)
