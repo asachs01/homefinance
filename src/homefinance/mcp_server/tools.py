@@ -4,9 +4,11 @@ with ``@mcp.tool()`` decorators in ``__main__.py``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from homefinance.db.store import Store
+
+Mode = Literal["leaves", "tops"]
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -89,4 +91,81 @@ def list_categories(
         "SELECT id, source_id, external_id, name, group_name "
         "FROM categories WHERE " + " AND ".join(where) + " ORDER BY group_name, name"
     )
+    return [_row_to_dict(r) for r in store.execute(sql, params).fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Transactions
+
+
+def query_transactions(
+    store: Store,
+    source_id: str | None = None,
+    account_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    category_id: str | None = None,
+    payee_contains: str | None = None,
+    amount_min_minor: int | None = None,
+    amount_max_minor: int | None = None,
+    cleared: str | None = None,
+    include_deleted: bool = False,
+    mode: Mode = "leaves",
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List transactions. ``mode='leaves'`` (default) = non-split rows + split
+    children (analysis view, correct category attribution).
+    ``mode='tops'`` = non-split rows + split parents (user-facing view).
+    Both views sum to the same total — see spec §6.3.
+    """
+    where: list[str] = []
+    params: list[Any] = []
+
+    if mode == "leaves":
+        where.append("is_split_parent = 0")
+    elif mode == "tops":
+        where.append("parent_id IS NULL")
+    else:
+        raise ValueError(f"invalid mode: {mode!r}")
+
+    if not include_deleted:
+        where.append("deleted = 0")
+    if source_id is not None:
+        where.append("source_id = ?")
+        params.append(source_id)
+    if account_id is not None:
+        where.append("account_id = ?")
+        params.append(account_id)
+    if date_from is not None:
+        where.append("date >= ?")
+        params.append(date_from)
+    if date_to is not None:
+        where.append("date <= ?")
+        params.append(date_to)
+    if category_id is not None:
+        where.append("category_id = ?")
+        params.append(category_id)
+    if payee_contains is not None:
+        where.append("payee LIKE ?")
+        params.append(f"%{payee_contains}%")
+    if amount_min_minor is not None:
+        where.append("amount_minor >= ?")
+        params.append(amount_min_minor)
+    if amount_max_minor is not None:
+        where.append("amount_minor <= ?")
+        params.append(amount_max_minor)
+    if cleared is not None:
+        where.append("cleared = ?")
+        params.append(cleared)
+
+    sql = (
+        "SELECT id, source_id, external_id, account_id, date, amount_minor, "
+        "currency, payee, memo, category_id, cleared, approved, flag_color, "
+        "import_id, transfer_account_id, parent_id, is_split_parent, deleted "
+        "FROM transactions WHERE "
+        + " AND ".join(where)
+        + " ORDER BY date DESC, id LIMIT ? OFFSET ?"
+    )
+    params.extend([limit, offset])
     return [_row_to_dict(r) for r in store.execute(sql, params).fetchall()]

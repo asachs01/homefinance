@@ -8,6 +8,7 @@ from homefinance.mcp_server.tools import (
     list_accounts,
     list_categories,
     list_sources,
+    query_transactions,
 )
 from homefinance.sources.ynab.fake_client import FakeYNABClient
 from homefinance.sources.ynab.source import YNABAccountSource
@@ -69,3 +70,53 @@ def test_list_categories_filters_hidden(synced_store: Store) -> None:
     assert "cat-dining" not in visible
     all_cats = {c["external_id"] for c in list_categories(synced_store, include_hidden=True)}
     assert "cat-dining" in all_cats
+
+
+def test_query_transactions_leaves_default_excludes_split_parent(synced_store: Store) -> None:
+    rows = query_transactions(synced_store)
+    ext_ids = {r["external_id"] for r in rows}
+    # Leaves view: parents excluded, children included.
+    assert "txn-split" not in ext_ids
+    assert any(":sub:" in eid for eid in ext_ids)
+    # Sum over leaves should match sum over tops.
+    leaves_total = sum(r["amount_minor"] for r in rows)
+    tops_total = sum(r["amount_minor"] for r in query_transactions(synced_store, mode="tops"))
+    assert leaves_total == tops_total
+
+
+def test_query_transactions_tops_includes_split_parent_not_children(synced_store: Store) -> None:
+    rows = query_transactions(synced_store, mode="tops")
+    ext_ids = {r["external_id"] for r in rows}
+    assert "txn-split" in ext_ids
+    assert not any(":sub:" in eid for eid in ext_ids)
+
+
+def test_query_transactions_filters_by_date_range(synced_store: Store) -> None:
+    rows = query_transactions(synced_store, date_from="2026-06-02", date_to="2026-06-02")
+    dates = {r["date"] for r in rows}
+    assert dates == {"2026-06-02"}
+
+
+def test_query_transactions_excludes_deleted_by_default(synced_store: Store) -> None:
+    synced_store.execute("UPDATE transactions SET deleted = 1 WHERE external_id = 'txn-non-split'")
+    rows = query_transactions(synced_store)
+    assert all(r["external_id"] != "txn-non-split" for r in rows)
+    rows_all = query_transactions(synced_store, include_deleted=True)
+    assert any(r["external_id"] == "txn-non-split" for r in rows_all)
+
+
+def test_query_transactions_filters_by_amount_range(synced_store: Store) -> None:
+    rows = query_transactions(synced_store, amount_max_minor=-3000)
+    assert all(r["amount_minor"] <= -3000 for r in rows)
+
+
+def test_query_transactions_filters_by_payee_substring(synced_store: Store) -> None:
+    rows = query_transactions(synced_store, payee_contains="Trader")
+    assert all("Trader" in (r["payee"] or "") for r in rows)
+
+
+def test_query_transactions_limit_and_offset(synced_store: Store) -> None:
+    page1 = query_transactions(synced_store, limit=1, offset=0)
+    page2 = query_transactions(synced_store, limit=1, offset=1)
+    assert len(page1) == 1 and len(page2) == 1
+    assert page1[0]["id"] != page2[0]["id"]

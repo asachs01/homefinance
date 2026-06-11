@@ -66,5 +66,41 @@ def list_categories(source_id: str | None = None, include_hidden: bool = False) 
     )
 
 
+@mcp.tool()
+def query_transactions(
+    source_id: str | None = None,
+    account_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    category_id: str | None = None,
+    payee_contains: str | None = None,
+    amount_min_minor: int | None = None,
+    amount_max_minor: int | None = None,
+    cleared: str | None = None,
+    include_deleted: bool = False,
+    mode: str = "leaves",
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict]:  # type: ignore[type-arg]
+    """List transactions. ``mode='leaves'`` (default) gives the analysis view;
+    ``mode='tops'`` gives the user-facing 'one transaction per split' view."""
+    return _tools.query_transactions(
+        _store_cached(),
+        source_id=source_id,
+        account_id=account_id,
+        date_from=date_from,
+        date_to=date_to,
+        category_id=category_id,
+        payee_contains=payee_contains,
+        amount_min_minor=amount_min_minor,
+        amount_max_minor=amount_max_minor,
+        cleared=cleared,
+        include_deleted=include_deleted,
+        mode=mode,  # type: ignore[arg-type]
+        limit=limit,
+        offset=offset,
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     mcp.run()
