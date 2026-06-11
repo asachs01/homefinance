@@ -6,11 +6,18 @@ This is the only place in the codebase that converts YNAB's wire format
 
 from __future__ import annotations
 
-from homefinance.sources.base import RemoteAccount, RemoteCategory, RemotePayee
+from homefinance.sources.base import (
+    RemoteAccount,
+    RemoteCategory,
+    RemotePayee,
+    RemoteSubTxn,
+    RemoteTransaction,
+)
 from homefinance.sources.ynab.models import (
     CategoriesResponse,
     YNABAccount,
     YNABPayee,
+    YNABTransaction,
 )
 
 
@@ -89,4 +96,42 @@ def map_payee(yp: YNABPayee) -> RemotePayee:
         name=yp.name,
         transfer_account_external_id=yp.transfer_account_id,
         deleted=yp.deleted,
+    )
+
+
+def map_transaction(yt: YNABTransaction, currency: str = "USD") -> RemoteTransaction:
+    """YNAB transaction → canonical, with non-deleted subtransactions preserved.
+
+    The ``is_split_parent`` flag on the persisted row is set by the sync
+    orchestrator (``len(subtransactions) > 0``) — this function just carries
+    the data through.
+    """
+    subs = tuple(
+        RemoteSubTxn(
+            amount_minor=to_minor_units(s.amount),
+            memo=s.memo,
+            category_external_id=s.category_id,
+            payee_external_id=s.payee_id,
+            transfer_account_external_id=s.transfer_account_id,
+        )
+        for s in yt.subtransactions
+        if not s.deleted
+    )
+    return RemoteTransaction(
+        external_id=yt.id,
+        account_external_id=yt.account_id,
+        date=yt.date,
+        amount_minor=to_minor_units(yt.amount),
+        currency=currency,
+        payee=yt.payee_name,
+        payee_external_id=yt.payee_id,
+        memo=yt.memo,
+        category_external_id=yt.category_id,
+        cleared=yt.cleared,
+        approved=yt.approved,
+        flag_color=yt.flag_color,
+        import_id=yt.import_id,
+        transfer_account_external_id=yt.transfer_account_id,
+        deleted=yt.deleted,
+        subtransactions=subs,
     )

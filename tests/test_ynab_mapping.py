@@ -8,6 +8,7 @@ from homefinance.sources.ynab.mapping import (
     map_account,
     map_categories,
     map_payee,
+    map_transaction,
     to_minor_units,
 )
 
@@ -80,3 +81,50 @@ def test_map_payee_carries_transfer_account(tiny_fixtures_dir: Path) -> None:
     by_id = {p.id: map_payee(p) for p in payees}
     assert by_id["payee-xfer-credit"].transfer_account_external_id == "acct-credit"
     assert by_id["payee-trader-joes"].transfer_account_external_id is None
+
+
+def test_map_transaction_non_split(tiny_fixtures_dir: Path) -> None:
+    txns = FakeYNABClient(tiny_fixtures_dir).get_transactions("budget-tiny").data.transactions
+    non_split = next(t for t in txns if t.id == "txn-non-split")
+    rt = map_transaction(non_split)
+    assert rt.amount_minor == -4567
+    assert rt.category_external_id == "cat-groceries"
+    assert rt.payee == "Trader Joe's"
+    assert rt.subtransactions == ()
+    assert rt.deleted is False
+    assert rt.import_id == "YNAB:imp-1"
+
+
+def test_map_transaction_split_children_sum_to_parent(tiny_fixtures_dir: Path) -> None:
+    txns = FakeYNABClient(tiny_fixtures_dir).get_transactions("budget-tiny").data.transactions
+    split = next(t for t in txns if t.id == "txn-split")
+    rt = map_transaction(split)
+    assert rt.amount_minor == -5000
+    assert len(rt.subtransactions) == 2
+    assert sum(s.amount_minor for s in rt.subtransactions) == rt.amount_minor
+    cats = {s.category_external_id for s in rt.subtransactions}
+    assert cats == {"cat-gas", "cat-groceries"}
+
+
+def test_map_transaction_drops_deleted_subtransactions() -> None:
+    from homefinance.sources.ynab.models import YNABTransaction
+
+    yt = YNABTransaction.model_validate({
+        "id": "t1", "date": "2026-06-01", "amount": -1000, "account_id": "a",
+        "approved": True, "deleted": False,
+        "subtransactions": [
+            {"id": "s1", "amount": -700, "category_id": "c1", "deleted": False},
+            {"id": "s2", "amount": -300, "category_id": "c2", "deleted": True},
+        ],
+    })
+    rt = map_transaction(yt)
+    assert len(rt.subtransactions) == 1
+    assert rt.subtransactions[0].category_external_id == "c1"
+
+
+def test_map_transaction_transfer(tiny_fixtures_dir: Path) -> None:
+    txns = FakeYNABClient(tiny_fixtures_dir).get_transactions("budget-tiny").data.transactions
+    xfer = next(t for t in txns if t.id == "txn-transfer")
+    rt = map_transaction(xfer)
+    assert rt.transfer_account_external_id == "acct-credit"
+    assert rt.subtransactions == ()
