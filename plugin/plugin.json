@@ -1,0 +1,10 @@
+{
+  "name": "homefinance",
+  "version": "0.1.0",
+  "description": "Open-source, local-first home financial analysis. Syncs YNAB, exposes spending/balance/transaction tools, and ships skills for setup and exploration.",
+  "author": {
+    "name": "Aaron Sachs"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/asachs/homefinance"
+}

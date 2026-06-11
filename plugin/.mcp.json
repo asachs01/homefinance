@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "homefinance": {
+      "command": "python",
+      "args": ["-m", "homefinance.mcp_server"]
+    }
+  }
+}
