@@ -193,9 +193,45 @@ def init(
 
 
 @app.command()
-def sync(source: str | None = typer.Option(None, "--source", "-s")) -> None:
-    """Sync one or all sources. Implemented in Task 19."""
-    raise typer.Exit(code=2)
+def sync(
+    source: str | None = typer.Option(
+        None, "--source", "-s",
+        help="Sync only the named source_id (e.g., ynab:abc). Default: all.",
+    ),
+) -> None:
+    """Sync one or all configured budgets."""
+    cfg = load_config()
+    if cfg.ynab_token is None:
+        err_console.print(
+            "[red]No YNAB token configured.[/] Set "
+            "[bold]HOMEFINANCE_YNAB_TOKEN[/] or add [bold][ynab].token[/] to "
+            f"{cfg.config_path}."
+        )
+        raise typer.Exit(code=1)
+    if not cfg.ynab.budgets:
+        err_console.print(
+            "[red]No budgets configured.[/] Run [bold]homefinance init[/]."
+        )
+        raise typer.Exit(code=1)
+
+    client = _make_client(cfg.ynab_token.get_secret_value())
+    store = Store.open(cfg.db_path)
+
+    targets = cfg.ynab.budgets
+    if source is not None:
+        targets = [b for b in cfg.ynab.budgets if f"ynab:{b.budget_id}" == source]
+        if not targets:
+            err_console.print(f"[red]Source {source!r} not found in config.[/]")
+            raise typer.Exit(code=1)
+
+    for b in targets:
+        src = YNABAccountSource(b.budget_id, client, nickname=b.nickname)
+        result = run_sync(cast(AccountSource, src), store)
+        console.print(
+            f"[green]Synced[/] {b.nickname or b.budget_id}: "
+            f"{result.txns_inserted} new, {result.txns_updated} updated, "
+            f"{result.txns_deleted} deleted; reconciliation={result.reconciliation}"
+        )
 
 
 ynab_app = typer.Typer(help="YNAB budget management.")

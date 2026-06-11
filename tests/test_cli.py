@@ -87,3 +87,45 @@ def test_init_runs_first_sync_unless_no_sync(
     with sqlite3.connect(env / "db.sqlite3") as conn:
         n = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
     assert n >= 3  # parent split counts; children add more
+
+
+def test_sync_processes_all_configured_budgets(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    monkeypatch.setenv("HOMEFINANCE_YNAB_TOKEN", "T")
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == 0, result.stdout
+    assert "tiny" in result.stdout
+    assert "reconciliation" in result.stdout
+
+
+def test_sync_fails_clearly_without_token(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    # No HOMEFINANCE_YNAB_TOKEN, no token in file
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code != 0
+    assert "token" in result.stdout.lower() or "token" in (result.stderr or "").lower()
+
+
+def test_sync_with_source_flag_targets_one(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    monkeypatch.setenv("HOMEFINANCE_YNAB_TOKEN", "T")
+    result = runner.invoke(app, ["sync", "--source", "ynab:budget-tiny"])
+    assert result.exit_code == 0, result.stdout
