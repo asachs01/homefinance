@@ -34,7 +34,9 @@ def test_pull_returns_full_delta(source: YNABAccountSource) -> None:
     assert {c.external_id for c in delta.categories} == {"cat-groceries", "cat-dining", "cat-gas"}
     assert {p.external_id for p in delta.payees} >= {"payee-trader-joes", "payee-shell"}
     assert {t.external_id for t in delta.transactions} == {
-        "txn-non-split", "txn-split", "txn-transfer",
+        "txn-non-split",
+        "txn-split",
+        "txn-transfer",
     }
     assert delta.new_cursor == 100
 

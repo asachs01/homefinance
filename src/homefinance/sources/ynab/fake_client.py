@@ -52,8 +52,6 @@ class FakeYNABClient:
     def get_payees(self, budget_id: str, cursor: int | None = None) -> PayeesResponse:
         return PayeesResponse.model_validate(self._load("payees.json"))
 
-    def get_transactions(
-        self, budget_id: str, cursor: int | None = None
-    ) -> TransactionsResponse:
+    def get_transactions(self, budget_id: str, cursor: int | None = None) -> TransactionsResponse:
         name = "transactions_delta.json" if cursor is not None else "transactions.json"
         return TransactionsResponse.model_validate(self._load(name))

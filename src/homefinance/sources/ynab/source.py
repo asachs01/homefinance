@@ -33,9 +33,7 @@ class _ClientLike(Protocol):
     def get_user(self) -> UserResponse: ...
     def get_budgets(self) -> BudgetsResponse: ...
     def get_accounts(self, budget_id: str, cursor: int | None = None) -> AccountsResponse: ...
-    def get_categories(
-        self, budget_id: str, cursor: int | None = None
-    ) -> CategoriesResponse: ...
+    def get_categories(self, budget_id: str, cursor: int | None = None) -> CategoriesResponse: ...
     def get_payees(self, budget_id: str, cursor: int | None = None) -> PayeesResponse: ...
     def get_transactions(
         self, budget_id: str, cursor: int | None = None
@@ -86,9 +84,7 @@ class YNABAccountSource:
         new_cursor: int | None = max(knowledges) if knowledges else None
 
         return SyncDelta(
-            accounts=tuple(
-                map_account(a, currency=self._currency) for a in accts.data.accounts
-            ),
+            accounts=tuple(map_account(a, currency=self._currency) for a in accts.data.accounts),
             categories=tuple(map_categories(cats)),
             payees=tuple(map_payee(p) for p in payees.data.payees),
             transactions=tuple(

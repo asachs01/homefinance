@@ -97,9 +97,7 @@ class YNABClient:
             self._get(f"/budgets/{budget_id}/payees", cursor=cursor)
         )
 
-    def get_transactions(
-        self, budget_id: str, cursor: int | None = None
-    ) -> TransactionsResponse:
+    def get_transactions(self, budget_id: str, cursor: int | None = None) -> TransactionsResponse:
         return TransactionsResponse.model_validate(
             self._get(f"/budgets/{budget_id}/transactions", cursor=cursor)
         )

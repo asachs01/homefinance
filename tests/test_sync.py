@@ -70,9 +70,7 @@ def test_idempotent_second_run_inserts_nothing_new(
     assert second.txns_inserted == 0
 
 
-def test_delta_updates_existing_and_soft_deletes(
-    store: Store, tiny_fixtures_dir: Path
-) -> None:
+def test_delta_updates_existing_and_soft_deletes(store: Store, tiny_fixtures_dir: Path) -> None:
     src = YNABAccountSource("budget-tiny", FakeYNABClient(tiny_fixtures_dir))
     run_sync(src, store)
     # Force a delta call by simulating "second run" (FakeYNABClient returns

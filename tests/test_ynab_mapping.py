@@ -60,17 +60,33 @@ def test_map_categories_flattens_groups(tiny_fixtures_dir: Path) -> None:
 def test_map_categories_inherits_group_hidden_or_deleted() -> None:
     from homefinance.sources.ynab.models import CategoriesResponse
 
-    resp = CategoriesResponse.model_validate({
-        "data": {
-            "server_knowledge": 1,
-            "category_groups": [
-                {"id": "g1", "name": "Hidden", "hidden": True, "deleted": False,
-                 "categories": [{"id": "c1", "name": "x", "hidden": False, "deleted": False}]},
-                {"id": "g2", "name": "Gone", "hidden": False, "deleted": True,
-                 "categories": [{"id": "c2", "name": "y", "hidden": False, "deleted": False}]},
-            ],
-        },
-    })
+    resp = CategoriesResponse.model_validate(
+        {
+            "data": {
+                "server_knowledge": 1,
+                "category_groups": [
+                    {
+                        "id": "g1",
+                        "name": "Hidden",
+                        "hidden": True,
+                        "deleted": False,
+                        "categories": [
+                            {"id": "c1", "name": "x", "hidden": False, "deleted": False}
+                        ],
+                    },
+                    {
+                        "id": "g2",
+                        "name": "Gone",
+                        "hidden": False,
+                        "deleted": True,
+                        "categories": [
+                            {"id": "c2", "name": "y", "hidden": False, "deleted": False}
+                        ],
+                    },
+                ],
+            },
+        }
+    )
     cats = {c.external_id: c for c in map_categories(resp)}
     assert cats["c1"].hidden is True
     assert cats["c2"].deleted is True
@@ -109,14 +125,20 @@ def test_map_transaction_split_children_sum_to_parent(tiny_fixtures_dir: Path) -
 def test_map_transaction_drops_deleted_subtransactions() -> None:
     from homefinance.sources.ynab.models import YNABTransaction
 
-    yt = YNABTransaction.model_validate({
-        "id": "t1", "date": "2026-06-01", "amount": -1000, "account_id": "a",
-        "approved": True, "deleted": False,
-        "subtransactions": [
-            {"id": "s1", "amount": -700, "category_id": "c1", "deleted": False},
-            {"id": "s2", "amount": -300, "category_id": "c2", "deleted": True},
-        ],
-    })
+    yt = YNABTransaction.model_validate(
+        {
+            "id": "t1",
+            "date": "2026-06-01",
+            "amount": -1000,
+            "account_id": "a",
+            "approved": True,
+            "deleted": False,
+            "subtransactions": [
+                {"id": "s1", "amount": -700, "category_id": "c1", "deleted": False},
+                {"id": "s2", "amount": -300, "category_id": "c2", "deleted": True},
+            ],
+        }
+    )
     rt = map_transaction(yt)
     assert len(rt.subtransactions) == 1
     assert rt.subtransactions[0].category_external_id == "c1"

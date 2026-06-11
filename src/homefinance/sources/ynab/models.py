@@ -29,9 +29,9 @@ class YNABAccount(_Permissive):
     on_budget: bool
     closed: bool
     deleted: bool
-    balance: int                              # milliunits
-    cleared_balance: int                      # milliunits
-    uncleared_balance: int                    # milliunits
+    balance: int  # milliunits
+    cleared_balance: int  # milliunits
+    uncleared_balance: int  # milliunits
     last_reconciled_at: str | None = None
 
 
@@ -53,7 +53,7 @@ class YNABPayee(_Permissive):
 
 class YNABSubTransaction(_Permissive):
     id: str
-    amount: int                               # milliunits
+    amount: int  # milliunits
     memo: str | None = None
     payee_id: str | None = None
     category_id: str | None = None
@@ -63,8 +63,8 @@ class YNABSubTransaction(_Permissive):
 
 class YNABTransaction(_Permissive):
     id: str
-    date: str                                 # YYYY-MM-DD
-    amount: int                               # milliunits, signed
+    date: str  # YYYY-MM-DD
+    amount: int  # milliunits, signed
     memo: str | None = None
     cleared: str | None = None
     approved: bool
