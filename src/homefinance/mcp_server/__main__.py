@@ -125,5 +125,46 @@ def summarize_spending(
     )
 
 
+from typing import cast as _cast  # noqa: E402
+
+from homefinance.sources.base import AccountSource as _AccountSource  # noqa: E402
+from homefinance.sources.ynab.client import YNABClient as _YNABClient  # noqa: E402
+from homefinance.sources.ynab.source import (  # noqa: E402
+    YNABAccountSource as _YNABAccountSource,
+)
+
+
+def _ynab_sources(cfg: Config) -> list[_YNABAccountSource]:
+    if cfg.ynab_token is None:
+        raise RuntimeError(
+            "No YNAB token configured. Set HOMEFINANCE_YNAB_TOKEN or [ynab].token."
+        )
+    client = _YNABClient(token=cfg.ynab_token.get_secret_value())
+    return [
+        _YNABAccountSource(b.budget_id, client, nickname=b.nickname)
+        for b in cfg.ynab.budgets
+    ]
+
+
+@mcp.tool()
+def get_sync_status() -> list[dict]:  # type: ignore[type-arg]
+    """Per-source last-sync + drift summary."""
+    return _tools.get_sync_status(_store_cached())
+
+
+@mcp.tool()
+def sync_ynab(source_id: str | None = None) -> list[dict]:  # type: ignore[type-arg]
+    """Sync one (`source_id` set) or all configured YNAB budgets."""
+    cfg = _cfg_cached()
+    sources: list[_YNABAccountSource] = _ynab_sources(cfg)
+    if source_id is not None:
+        sources = [s for s in sources if s.source_id == source_id]
+        if not sources:
+            raise ValueError(f"source {source_id!r} not configured")
+    return _tools.sync_ynab_all(
+        _store_cached(), [_cast(_AccountSource, s) for s in sources]
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     mcp.run()

@@ -4,9 +4,12 @@ with ``@mcp.tool()`` decorators in ``__main__.py``.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from homefinance.db.store import Store
+from homefinance.sources.base import AccountSource
+from homefinance.sources.ynab.sync import SyncRunResult, run_sync
 
 Mode = Literal["leaves", "tops"]
 
@@ -238,3 +241,62 @@ def summarize_spending(
         {"key": r["key"], "total_minor": int(r["total_minor"]), "count": int(r["count"])}
         for r in store.execute(sql, params).fetchall()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Sync status + sync runner
+
+
+def get_sync_status(store: Store) -> list[dict[str, Any]]:
+    """Per-source last-sync + drift summary."""
+    rows = store.execute(
+        "SELECT s.id AS source_id, s.kind, s.nickname, "
+        "ss.last_sync_at, ss.server_knowledge, "
+        "(SELECT reconciliation FROM sync_runs WHERE source_id = s.id "
+        " ORDER BY id DESC LIMIT 1) AS last_reconciliation, "
+        "(SELECT drift_report FROM sync_runs WHERE source_id = s.id "
+        " ORDER BY id DESC LIMIT 1) AS last_drift_report "
+        "FROM sources s LEFT JOIN sync_state ss ON ss.source_id = s.id "
+        "ORDER BY s.id"
+    ).fetchall()
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        drift_count = 0
+        if r["last_drift_report"]:
+            try:
+                drift_count = len(json.loads(r["last_drift_report"]).get("accounts", []))
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                drift_count = 0
+        out.append({
+            "source_id":           r["source_id"],
+            "kind":                r["kind"],
+            "nickname":            r["nickname"],
+            "last_sync_at":        r["last_sync_at"],
+            "server_knowledge":    r["server_knowledge"],
+            "last_reconciliation": r["last_reconciliation"],
+            "drift_account_count": drift_count,
+        })
+    return out
+
+
+def _result_to_dict(r: SyncRunResult) -> dict[str, Any]:
+    return {
+        "source_id":         r.source_id,
+        "status":            r.status,
+        "txns_inserted":     r.txns_inserted,
+        "txns_updated":      r.txns_updated,
+        "txns_deleted":      r.txns_deleted,
+        "accounts_touched":  r.accounts_touched,
+        "reconciliation":    r.reconciliation,
+        "drift_report":      r.drift_report,
+    }
+
+
+def sync_ynab_all(store: Store, sources: list[AccountSource]) -> list[dict[str, Any]]:
+    """Sync each provided AccountSource and return the result rows."""
+    return [_result_to_dict(run_sync(s, store)) for s in sources]
+
+
+def sync_ynab_one(store: Store, source: AccountSource) -> dict[str, Any]:
+    return _result_to_dict(run_sync(source, store))

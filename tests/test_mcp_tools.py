@@ -152,3 +152,28 @@ def test_summarize_by_payee(synced_store: Store) -> None:
 def test_summarize_invalid_group_by_raises(synced_store: Store) -> None:
     with pytest.raises(ValueError):
         summarize_spending(synced_store, group_by="banana")
+
+
+from homefinance.mcp_server.tools import get_sync_status, sync_ynab_all  # noqa: E402
+
+
+def test_get_sync_status_returns_per_source_summary(synced_store: Store) -> None:
+    rows = get_sync_status(synced_store)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["source_id"] == "ynab:budget-tiny"
+    assert r["last_sync_at"] is not None
+    assert r["last_reconciliation"] in ("ok", "drift")
+    assert "drift_account_count" in r
+
+
+def test_sync_ynab_all_runs_for_each_budget(
+    store: Store, tiny_fixtures_dir: Path
+) -> None:
+    fake = FakeYNABClient(tiny_fixtures_dir)
+    sources = [YNABAccountSource("budget-tiny", fake, nickname="tiny")]
+    results = sync_ynab_all(store, sources)
+    assert len(results) == 1
+    assert results[0]["status"] == "success"
+    assert results[0]["source_id"] == "ynab:budget-tiny"
+    assert "reconciliation" in results[0]
