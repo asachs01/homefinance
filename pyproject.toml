@@ -72,4 +72,13 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config"
 testpaths = ["tests"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # yoyo-migrations relies on sqlite3's default datetime adapter, which
+    # Python 3.12+ deprecates. Narrow ignore until yoyo updates upstream.
+    "ignore:The default datetime adapter is deprecated:DeprecationWarning",
+    # yoyo-migrations does not always close its sqlite3 connections; the
+    # resulting ResourceWarning surfaces during GC as a pytest unraisable.
+    "ignore:unclosed database:ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
