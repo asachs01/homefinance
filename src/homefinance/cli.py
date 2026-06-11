@@ -57,6 +57,11 @@ def _secure_write_config(path: Path, content: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(content)
+    # O_CREAT's mode arg only applies on *creation*. If `path` pre-existed at
+    # a looser mode (e.g., 0o644), the file inode kept its prior bits. Enforce
+    # 0o600 unconditionally so an upgrade from a permissive layout tightens.
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o600)
 
 
 def _render_config_toml(budgets: list[YNABBudget], include_token: str | None) -> str:
@@ -87,9 +92,7 @@ def status() -> None:
     """Show configured sources and their last-sync state."""
     cfg = load_config()
     if not cfg.db_path.exists():
-        console.print(
-            "[yellow]No sources configured.[/] Run [bold]homefinance init[/] first."
-        )
+        console.print("[yellow]No sources configured.[/] Run [bold]homefinance init[/] first.")
         return
     store = Store.open(cfg.db_path)
     rows = store.execute(
@@ -103,9 +106,7 @@ def status() -> None:
     ).fetchall()
 
     if not rows:
-        console.print(
-            "[yellow]No sources configured.[/] Run [bold]homefinance init[/] first."
-        )
+        console.print("[yellow]No sources configured.[/] Run [bold]homefinance init[/] first.")
         return
 
     table = Table(title="Sources")
@@ -128,23 +129,27 @@ def status() -> None:
 @app.command()
 def init(
     token: str | None = typer.Option(
-        None, "--token",
+        None,
+        "--token",
         envvar="HOMEFINANCE_YNAB_TOKEN",
         help="YNAB Personal Access Token. If omitted, prompted interactively.",
     ),
     budget_ids: list[str] | None = typer.Option(  # noqa: B008
-        None, "--budget", "-b",
+        None,
+        "--budget",
+        "-b",
         help="Budget IDs to track. May be repeated. If omitted, prompted.",
     ),
     nicknames: list[str] | None = typer.Option(  # noqa: B008
-        None, "--nickname", "-n",
+        None,
+        "--nickname",
+        "-n",
         help="Nicknames matching --budget order. Defaults to budget name slug.",
     ),
-    no_sync: bool = typer.Option(
-        False, "--no-sync", help="Skip the post-setup sync."
-    ),
+    no_sync: bool = typer.Option(False, "--no-sync", help="Skip the post-setup sync."),
     save_token_to_file: bool = typer.Option(
-        False, "--save-token-to-file",
+        False,
+        "--save-token-to-file",
         help="Persist the token to config.toml (default: keep it in env only).",
     ),
 ) -> None:
@@ -215,7 +220,9 @@ def init(
 @app.command()
 def sync(
     source: str | None = typer.Option(
-        None, "--source", "-s",
+        None,
+        "--source",
+        "-s",
         help="Sync only the named source_id (e.g., ynab:abc). Default: all.",
     ),
 ) -> None:
@@ -229,9 +236,7 @@ def sync(
         )
         raise typer.Exit(code=1)
     if not cfg.ynab.budgets:
-        err_console.print(
-            "[red]No budgets configured.[/] Run [bold]homefinance init[/]."
-        )
+        err_console.print("[red]No budgets configured.[/] Run [bold]homefinance init[/].")
         raise typer.Exit(code=1)
 
     client = _make_client(cfg.ynab_token.get_secret_value())
@@ -256,3 +261,34 @@ def sync(
 
 ynab_app = typer.Typer(help="YNAB budget management.")
 app.add_typer(ynab_app, name="ynab")
+
+
+@ynab_app.command("add-budget")
+def ynab_add_budget(
+    budget_id: str = typer.Option(..., "--budget-id", help="YNAB budget ID."),
+    nickname: str | None = typer.Option(None, "--nickname"),
+) -> None:
+    """Register an additional YNAB budget in config.toml."""
+    cfg = load_config()
+    if any(b.budget_id == budget_id for b in cfg.ynab.budgets):
+        err_console.print(f"[red]Budget {budget_id!r} is already registered.[/]")
+        raise typer.Exit(code=1)
+    new_list = [*cfg.ynab.budgets, YNABBudget(budget_id=budget_id, nickname=nickname)]
+    _secure_write_config(cfg.config_path, _render_config_toml(new_list, include_token=None))
+    console.print(f"[green]Added[/] budget {budget_id} (nickname: {nickname or '-'})")
+
+
+@ynab_app.command("remove-budget")
+def ynab_remove_budget(
+    budget_id: str = typer.Option(..., "--budget-id"),
+) -> None:
+    """Remove a YNAB budget from config.toml. Does not delete its data from the DB."""
+    cfg = load_config()
+    new_list = [b for b in cfg.ynab.budgets if b.budget_id != budget_id]
+    if len(new_list) == len(cfg.ynab.budgets):
+        err_console.print(f"[red]Budget {budget_id!r} not found in config.[/]")
+        raise typer.Exit(code=1)
+    _secure_write_config(cfg.config_path, _render_config_toml(new_list, include_token=None))
+    console.print(
+        f"[yellow]Removed[/] budget {budget_id} from config. Existing data in the DB is preserved."
+    )

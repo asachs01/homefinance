@@ -35,10 +35,10 @@ def test_status_lists_configured_sources(env: Path) -> None:
     db = env / "db.sqlite3"
     migrate(db)
     import sqlite3
+
     with sqlite3.connect(db) as conn:
         conn.execute(
-            "INSERT INTO sources (id, kind, nickname, config, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO sources (id, kind, nickname, config, created_at) VALUES (?, ?, ?, ?, ?)",
             ("ynab:abc", "ynab", "personal", None, "2026-06-10T00:00:00+00:00"),
         )
         conn.commit()
@@ -52,9 +52,7 @@ from homefinance.sources.ynab.fake_client import FakeYNABClient  # noqa: E402
 
 
 def _patch_client(monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path) -> None:
-    monkeypatch.setattr(
-        "homefinance.cli._make_client", lambda token: FakeYNABClient(fixtures_dir)
-    )
+    monkeypatch.setattr("homefinance.cli._make_client", lambda token: FakeYNABClient(fixtures_dir))
 
 
 def test_init_writes_config_and_migrates_db(
@@ -88,6 +86,32 @@ def test_init_writes_config_with_owner_only_permissions(
     assert parent_mode == 0o700, f"expected 0o700 on parent, got {oct(parent_mode)}"
 
 
+def test_init_tightens_permissions_on_preexisting_loose_config(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    """Upgrade case: a config.toml left behind at 0o644 by a prior install (or
+    by a user editing it manually) must be tightened to 0o600 on rewrite —
+    O_CREAT's mode arg is a no-op when the file already exists, so the explicit
+    chmod is what guarantees this."""
+    import os as _os
+
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    cfg_path = env / "config.toml"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text("# pre-existing loose config\n")
+    _os.chmod(cfg_path, 0o644)
+    assert (cfg_path.stat().st_mode & 0o777) == 0o644  # sanity
+
+    result = runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert (cfg_path.stat().st_mode & 0o777) == 0o600, (
+        f"upgrade did not tighten; got {oct(cfg_path.stat().st_mode & 0o777)}"
+    )
+
+
 def test_init_runs_first_sync_unless_no_sync(
     env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
 ) -> None:
@@ -100,6 +124,7 @@ def test_init_runs_first_sync_unless_no_sync(
     assert "3 new" in result.stdout or "synced" in result.stdout.lower()
 
     import sqlite3
+
     with sqlite3.connect(env / "db.sqlite3") as conn:
         n = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
     assert n >= 3  # parent split counts; children add more
@@ -145,3 +170,52 @@ def test_sync_with_source_flag_targets_one(
     monkeypatch.setenv("HOMEFINANCE_YNAB_TOKEN", "T")
     result = runner.invoke(app, ["sync", "--source", "ynab:budget-tiny"])
     assert result.exit_code == 0, result.stdout
+
+
+def test_ynab_add_budget_appends_to_config(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    result = runner.invoke(
+        app, ["ynab", "add-budget", "--budget-id", "budget-second", "--nickname", "second"]
+    )
+    assert result.exit_code == 0, result.stdout
+    cfg = (env / "config.toml").read_text()
+    assert 'budget_id = "budget-tiny"' in cfg
+    assert 'budget_id = "budget-second"' in cfg
+    assert 'nickname = "second"' in cfg
+
+
+def test_ynab_remove_budget_drops_entry(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    runner.invoke(
+        app, ["ynab", "add-budget", "--budget-id", "budget-second", "--nickname", "second"]
+    )
+    result = runner.invoke(app, ["ynab", "remove-budget", "--budget-id", "budget-tiny"])
+    assert result.exit_code == 0, result.stdout
+    cfg = (env / "config.toml").read_text()
+    assert 'budget_id = "budget-tiny"' not in cfg
+    assert 'budget_id = "budget-second"' in cfg
+
+
+def test_ynab_remove_unknown_budget_errors(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    result = runner.invoke(app, ["ynab", "remove-budget", "--budget-id", "nope"])
+    assert result.exit_code != 0
+    assert "not found" in result.stdout.lower() or "not found" in (result.stderr or "").lower()
