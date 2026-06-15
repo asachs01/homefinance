@@ -25,9 +25,7 @@ from typing import Any
 from homefinance.sources.ynab.client import YNABClient
 
 
-def _renumber(
-    seq: list[dict[str, Any]], id_key: str, prefix: str, mapping: dict[str, str]
-) -> None:
+def _renumber(seq: list[dict[str, Any]], id_key: str, prefix: str, mapping: dict[str, str]) -> None:
     for i, item in enumerate(seq, start=1):
         real_id = item[id_key]
         if real_id not in mapping:
