@@ -269,3 +269,59 @@ def test_accounts_add_invalid_type_errors(
         app, ["accounts", "add", "--nickname", "x", "--type", "banana"]
     )
     assert result.exit_code != 0
+
+
+def test_ingest_with_no_prompt_stages_batch(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(app, ["init", "--token", "T", "--budget", "budget-tiny",
+                        "--nickname", "tiny", "--no-sync"])
+    runner.invoke(app, ["accounts", "add", "--nickname", "citi-cc",
+                        "--type", "credit_card", "--currency", "USD"])
+    cfg_dir = env
+    templates = cfg_dir / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = (Path(__file__).resolve().parent
+               / "fixtures" / "statement" / "tiny.csv")
+    result = runner.invoke(app, [
+        "ingest", str(fixture),
+        "--account", "citi-cc", "--no-prompt", "--no-archive",
+    ])
+    assert result.exit_code == 0, result.stdout
+    assert "batch_id" in result.stdout
+
+
+def test_ingest_prompt_y_confirms(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(app, ["init", "--token", "T", "--budget", "budget-tiny",
+                        "--nickname", "tiny", "--no-sync"])
+    runner.invoke(app, ["accounts", "add", "--nickname", "citi-cc",
+                        "--type", "credit_card", "--currency", "USD"])
+    cfg_dir = env
+    (cfg_dir / "templates").mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = (Path(__file__).resolve().parent
+               / "fixtures" / "statement" / "tiny.csv")
+    result = runner.invoke(
+        app,
+        ["ingest", str(fixture), "--account", "citi-cc", "--no-archive"],
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Confirmed" in result.stdout

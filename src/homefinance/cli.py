@@ -23,8 +23,18 @@ from homefinance.sources.statement.ingest import (
     AccountAlreadyRegistered,
 )
 from homefinance.sources.statement.ingest import (
+    confirm_batch as _confirm_batch,
+)
+from homefinance.sources.statement.ingest import (
+    ingest_file as _ingest_file,
+)
+from homefinance.sources.statement.ingest import (
     register_account as _register_statement_account,
 )
+from homefinance.sources.statement.ingest import (
+    reject_batch as _reject_batch,
+)
+from homefinance.sources.statement.parsers.base import StatementIngestError
 from homefinance.sources.ynab.client import YNABClient
 from homefinance.sources.ynab.source import YNABAccountSource
 from homefinance.sources.ynab.sync import run_sync
@@ -338,3 +348,78 @@ def accounts_add(
     console.print(
         f"[green]Added[/] {ra.source_id} (type: {ra.type}, currency: {ra.currency})"
     )
+
+
+def _render_preview(preview: object) -> Table:
+    """Render a BatchPreview as a small Rich table for inline confirmation."""
+    from homefinance.sources.statement.ingest import BatchPreview
+    p = preview if isinstance(preview, BatchPreview) else None
+    assert p is not None
+    summary = Table(title=f"Batch #{p.batch_id} — {p.source_id}")
+    summary.add_column("field")
+    summary.add_column("value")
+    summary.add_row("transactions", str(p.txn_count))
+    summary.add_row(
+        "period",
+        f"{p.statement_period_start or '?'} → {p.statement_period_end or '?'}",
+    )
+    summary.add_row(
+        "reconciliation",
+        f"{p.reconciliation_status}"
+        + (f" (drift: {p.drift_minor / 100:+.2f})" if p.drift_minor else ""),
+    )
+    return summary
+
+
+@app.command()
+def ingest(
+    path: str = typer.Argument(...),
+    account: str = typer.Option(..., "--account", "-a"),
+    no_archive: bool = typer.Option(False, "--no-archive"),
+    no_prompt: bool = typer.Option(False, "--no-prompt"),
+    reingest: bool = typer.Option(False, "--reingest"),
+) -> None:
+    """Parse + stage a statement file; prompt to confirm or reject."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        migrate(cfg.db_path)
+    store = Store.open(cfg.db_path)
+
+    try:
+        preview = _ingest_file(
+            store,
+            path=Path(path),
+            account_nickname=account,
+            config_dir=cfg.config_path.parent,
+            archive_dir=cfg.config_path.parent / "archive",
+            archive=not no_archive,
+            allow_reingest=reingest,
+        )
+    except StatementIngestError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+
+    console.print(_render_preview(preview))
+
+    if no_prompt:
+        console.print(
+            f"[yellow]Staged[/] batch_id={preview.batch_id} "
+            "(pending review). Confirm with: "
+            f"[bold]homefinance batch confirm {preview.batch_id}[/]"
+        )
+        return
+
+    choice = typer.prompt("Confirm? [y/N/show-more]", default="N").strip().lower()
+    if choice == "show-more":
+        for t in preview.first_transactions:
+            console.print(
+                f"  {t.date}  {t.amount_minor / 100:+9.2f}  "
+                f"{t.payee or '-'}  {t.memo or ''}"
+            )
+        choice = typer.prompt("Confirm? [y/N]", default="N").strip().lower()
+    if choice == "y":
+        _confirm_batch(store, preview.batch_id)
+        console.print(f"[green]Confirmed[/] batch #{preview.batch_id}.")
+    else:
+        _reject_batch(store, preview.batch_id)
+        console.print(f"[yellow]Rejected[/] batch #{preview.batch_id}.")
