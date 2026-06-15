@@ -15,6 +15,15 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from homefinance.analysis.categorize import (
+    add_rule as _add_rule,
+)
+from homefinance.analysis.categorize import (
+    apply_categorization as _apply_categorization,
+)
+from homefinance.analysis.categorize import (
+    list_rules as _list_rules,
+)
 from homefinance.config import YNABBudget, load_config
 from homefinance.db.migrate import migrate
 from homefinance.db.store import Store
@@ -511,3 +520,87 @@ def batch_reject_cmd(batch_id: int) -> None:
         err_console.print(f"[red]{e}[/]")
         raise typer.Exit(code=1) from None
     console.print(f"[yellow]Rejected[/] batch #{batch_id}.")
+
+
+categorize_app = typer.Typer(help="Categorize transactions with rules.")
+app.add_typer(categorize_app, name="categorize")
+
+rules_app = typer.Typer(help="Manage categorization rules.")
+categorize_app.add_typer(rules_app, name="rules")
+
+
+@categorize_app.command("apply")
+def categorize_apply(
+    source: str | None = typer.Option(None, "--source"),
+) -> None:
+    """Re-derive canonical categories for all non-manual rows."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        migrate(cfg.db_path)
+    store = Store.open(cfg.db_path)
+    counts = _apply_categorization(store, source_id=source)
+    table = Table(title="Categorization")
+    table.add_column("source")
+    table.add_column("rows", justify="right")
+    for key in ("ynab", "rule", "manual", "uncategorized"):
+        table.add_row(key, str(counts[key]))
+    console.print(table)
+
+
+@rules_app.command("add")
+def categorize_rules_add(
+    field: str = typer.Option(..., "--field", help="payee | memo"),
+    pattern: str = typer.Option(..., "--pattern"),
+    category: str = typer.Option(..., "--category"),
+    regex: bool = typer.Option(False, "--regex"),
+    priority: int = typer.Option(100, "--priority"),
+) -> None:
+    """Add a categorization rule."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        migrate(cfg.db_path)
+    store = Store.open(cfg.db_path)
+    try:
+        rid = _add_rule(
+            store,
+            priority=priority,
+            match_field=field,
+            pattern=pattern,
+            is_regex=regex,
+            canonical_category=category,
+        )
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[green]Added rule[/] #{rid}: {field} ~ {pattern!r} → {category}")
+
+
+@rules_app.command("list")
+def categorize_rules_list() -> None:
+    """List categorization rules in evaluation order."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        console.print("[yellow]No database yet.[/]")
+        return
+    store = Store.open(cfg.db_path)
+    rows = _list_rules(store)
+    if not rows:
+        console.print("[yellow]No rules defined.[/]")
+        return
+    table = Table(title="Categorization Rules")
+    table.add_column("id", justify="right")
+    table.add_column("priority", justify="right")
+    table.add_column("field")
+    table.add_column("pattern")
+    table.add_column("regex")
+    table.add_column("category")
+    for r in rows:
+        table.add_row(
+            str(r["id"]),
+            str(r["priority"]),
+            r["match_field"],
+            r["pattern"],
+            "yes" if r["is_regex"] else "no",
+            r["canonical_category"],
+        )
+    console.print(table)

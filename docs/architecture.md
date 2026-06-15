@@ -28,10 +28,15 @@ src/homefinance/
 │       ├── archive.py      # source-file archiving
 │       ├── templates.py    # per-account TOML template loader
 │       └── parsers/        # Strategy registry; lazy-imported parser impls
+├── analysis/           # SP3 analytics (pure, deterministic — no numpy/pandas)
+│   ├── categorize.py   # rule engine + idempotent apply pass + suggestion helpers
+│   ├── cashflow.py     # inflow/outflow/net per period (transfers excluded)
+│   ├── recurring.py    # median-gap cadence detection + next-occurrence forecast
+│   └── anomaly.py      # category-month z-score baseline
 ├── mcp_server/
 │   ├── __main__.py     # stdio entry; FastMCP tool registrations
 │   └── tools.py        # tool implementations as plain functions (testable)
-└── cli.py              # typer + rich CLI (init / sync / status / ynab subcmds)
+└── cli.py              # typer + rich CLI (init / sync / status / ynab / accounts / ingest / categorize)
 ```
 
 ## Three invariants
@@ -62,10 +67,14 @@ Statement parses don't go straight into the canonical store. Pipeline:
 
 `summarize_spending` always filters `status='confirmed'`. `query_transactions` excludes pending rows by default; opt in with `include_pending=True`.
 
+## Categorization & the canonical taxonomy (SP3)
+
+The canonical category vocabulary *is* the set of YNAB category names. `apply_categorization` is idempotent: it derives YNAB rows' categories from their names, fills statement rows from ordered rules, and never clobbers manual assignments (`category_source='manual'`). Analytics group by `canonical_category` for cross-source views. Claude assists only the unmatched long tail at the skill layer — every runtime money path stays deterministic. Cash-flow, recurring detection, and anomaly detection are pure SQL + stdlib arithmetic (no numpy/pandas).
+
 ## Tools vs skills
 
-- **Tools** (8 read tools + `sync_ynab`) are primitives. They live in code and ship with the package.
-- **Skills** (`homefinance-setup`, `homefinance-explore`) are workflows. They live in `plugin/skills/` as markdown and can be edited by users without code changes.
+- **Tools** (21 read/analysis tools) are primitives. They live in code and ship with the package.
+- **Skills** (`homefinance-setup`, `homefinance-explore`, `homefinance-import-statement`, `homefinance-categorize`, `homefinance-analyze`) are workflows. They live in `plugin/skills/` as markdown and can be edited by users without code changes.
 
 ## See also
 

@@ -2,16 +2,16 @@
 
 Open-source, local-first home financial analysis — distributed as a Claude Code plugin.
 
-**Status:** SP1 (Foundation + YNAB spine) ready for use.
+**Status:** SP1 (YNAB spine) + SP2 (statement ingestion) + SP3 (spending analytics) ready for use.
 
 ## What it does
 
 - Syncs **YNAB** (read-only) into a local SQLite store.
 - Ingests **statement files** (CSV / OFX / QFX / PDF via Docling) into the same canonical store, with a two-phase confirm/reject lifecycle so the parser's output is never trusted without human review.
-- 12 read tools (8 from SP1 plus `ingest_statement`, `list_batches`, `confirm_batch`, `reject_batch`).
-- Ships a third skill (`homefinance-import-statement`) for guided statement imports.
-- Ships two Claude Code skills (`homefinance-setup`, `homefinance-explore`) for guided setup and analysis.
-- Designed so spending analytics (SP3) and retirement optimization (SP4) plug in without schema changes.
+- **Analyzes** spending: hybrid categorization (rules + Claude-assisted long tail) into a unified taxonomy, cash-flow (income vs outflow, transfers excluded), recurring-charge detection with next-bill forecasts, and category anomaly detection.
+- 21 read/analysis MCP tools across YNAB sync, statement ingestion, and analytics.
+- Five Claude Code skills: `homefinance-setup`, `homefinance-explore`, `homefinance-import-statement`, `homefinance-categorize`, `homefinance-analyze`.
+- Designed so retirement optimization (SP4) plugs in without schema changes.
 
 ## Quickstart
 

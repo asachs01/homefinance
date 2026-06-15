@@ -37,7 +37,9 @@ Pick one based on context; do not ask all four:
 - Statement-imported transactions live in two states: **`confirmed`** (analytically visible) and **`pending_review`** (excluded by default). If the user explicitly asks "what's awaiting review?" pass `include_pending=True` to `query_transactions`. Never include pending rows in spending summaries — `summarize_spending` already filters them out.
 - If `get_sync_status` shows `pending_batch_count > 0` for any source, mention it: the user may have forgotten to confirm a batch. Suggest `/homefinance:import-statement` or `homefinance batch confirm <id>`.
 - If `get_sync_status` shows `last_reconciliation = 'drift'`, mention it briefly when relevant (e.g., the user asks about balances) but do not block the analysis.
-- If the user asks a question the read tools cannot answer (e.g., projection, allocation, retirement planning), say so honestly — those land in SP3 / SP4.
+- For category questions, prefer **`summarize_spending(group_by='canonical_category')`** — it unifies YNAB and statement categories. If statement spend is large and shows under `(uncategorized)`, suggest `/homefinance:categorize` first.
+- For cash flow, trends, recurring charges, or anomalies, hand off to **`/homefinance:analyze`** rather than answering from raw `query_transactions` output.
+- If the user asks a question the read tools cannot answer (e.g., budget targets, retirement planning), say so honestly — retirement lands in SP4.
 
 ## When the user asks "is anything off?"
 

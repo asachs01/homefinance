@@ -9,6 +9,15 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
 
+from homefinance.analysis.anomaly import detect_anomalies as _detect_anomalies_lib
+from homefinance.analysis.cashflow import cash_flow as _cash_flow_lib
+from homefinance.analysis.categorize import add_rule as _add_rule_lib
+from homefinance.analysis.categorize import apply_categorization as _apply_categorization_lib
+from homefinance.analysis.categorize import list_payees as _list_payees_lib
+from homefinance.analysis.categorize import list_rules as _list_rules_lib
+from homefinance.analysis.categorize import set_manual_category as _set_manual_category_lib
+from homefinance.analysis.categorize import suggest_categories as _suggest_categories_lib
+from homefinance.analysis.recurring import detect_recurring as _detect_recurring_lib
 from homefinance.db.store import Store
 from homefinance.sources.base import AccountSource
 from homefinance.sources.statement.ingest import (
@@ -200,7 +209,7 @@ def query_transactions(
 # Aggregations
 
 
-GroupBy = Literal["category", "payee", "month", "account", "day_of_week"]
+GroupBy = Literal["category", "payee", "month", "account", "day_of_week", "canonical_category"]
 
 
 _GROUP_EXPR: dict[str, str] = {
@@ -209,6 +218,7 @@ _GROUP_EXPR: dict[str, str] = {
     "month": "substr(t.date, 1, 7)",
     "account": "a.name",
     "day_of_week": "CAST(strftime('%w', t.date) AS INTEGER)",
+    "canonical_category": "COALESCE(t.canonical_category, '(uncategorized)')",
 }
 
 
@@ -377,3 +387,89 @@ def confirm_batch(store: Store, *, batch_id: int) -> dict[str, Any]:
 
 def reject_batch(store: Store, *, batch_id: int) -> dict[str, Any]:
     return _reject_batch_lib(store, batch_id)
+
+
+# ---------------------------------------------------------------------------
+# Analysis: categorization
+
+
+def add_category_rule(
+    store: Store,
+    *,
+    priority: int,
+    match_field: str,
+    pattern: str,
+    is_regex: bool = False,
+    canonical_category: str,
+    note: str | None = None,
+) -> int:
+    return _add_rule_lib(
+        store,
+        priority=priority,
+        match_field=match_field,
+        pattern=pattern,
+        is_regex=is_regex,
+        canonical_category=canonical_category,
+        note=note,
+    )
+
+
+def list_category_rules(store: Store) -> list[dict[str, Any]]:
+    return _list_rules_lib(store)
+
+
+def apply_categorization(store: Store, *, source_id: str | None = None) -> dict[str, int]:
+    return _apply_categorization_lib(store, source_id=source_id)
+
+
+def suggest_categories(store: Store, *, limit: int = 50) -> dict[str, Any]:
+    return _suggest_categories_lib(store, limit=limit)
+
+
+def set_transaction_category(
+    store: Store, *, transaction_id: str, canonical_category: str
+) -> dict[str, Any]:
+    return _set_manual_category_lib(
+        store, transaction_id=transaction_id, canonical_category=canonical_category
+    )
+
+
+def list_payees(
+    store: Store, *, source_id: str | None = None, name_contains: str | None = None
+) -> list[dict[str, Any]]:
+    return _list_payees_lib(store, source_id=source_id, name_contains=name_contains)
+
+
+# ---------------------------------------------------------------------------
+# Analysis: cash flow, recurring, anomalies
+
+
+def cash_flow(
+    store: Store,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    group_by: str = "month",
+    source_id: str | None = None,
+) -> list[dict[str, Any]]:
+    return _cash_flow_lib(
+        store,
+        date_from=date_from,
+        date_to=date_to,
+        group_by=group_by,  # type: ignore[arg-type]
+        source_id=source_id,
+    )
+
+
+def detect_recurring(
+    store: Store, *, min_occurrences: int = 3, amount_tolerance_minor: int = 200
+) -> list[dict[str, Any]]:
+    return _detect_recurring_lib(
+        store, min_occurrences=min_occurrences, amount_tolerance_minor=amount_tolerance_minor
+    )
+
+
+def detect_anomalies(
+    store: Store, *, trailing_months: int = 6, z_threshold: float = 2.0
+) -> list[dict[str, Any]]:
+    return _detect_anomalies_lib(store, trailing_months=trailing_months, z_threshold=z_threshold)

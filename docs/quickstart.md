@@ -71,6 +71,24 @@ The CLI parses, reconciles balance against the statement's closing total, and sh
 
 For a fully scripted flow, pass `--no-prompt`, then later run `homefinance batch confirm <id>` when you're ready.
 
+## Categorizing & analyzing
+
+YNAB transactions arrive categorized; statement-imported ones don't. Unify them once, then analyze.
+
+```bash
+# Add a rule, then apply (re-runnable any time)
+homefinance categorize rules add --field payee --pattern "TRADER JOE" --category Groceries
+homefinance categorize apply
+```
+
+From Claude Code, the `/homefinance:categorize` skill drives a faster loop: it surfaces uncategorized payees and proposes categories (constrained to your YNAB names) for you to confirm or promote into rules.
+
+Then ask analytical questions via `/homefinance:analyze`:
+
+> How did my cash flow look over the last 6 months?
+> What subscriptions am I paying, and what's due next?
+> Any unusual spending last month?
+
 ## Day-to-day
 
 - `homefinance sync` — re-sync from YNAB (cron-able)

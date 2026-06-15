@@ -115,7 +115,9 @@ def summarize_spending(
     cleared: str | None = None,
     group_by: str = "category",
 ) -> list[dict]:  # type: ignore[type-arg]
-    """Aggregate spending. ``group_by ∈ {category, payee, month, account, day_of_week}``."""
+    """Aggregate spending. ``group_by ∈ {category, canonical_category, payee, month, account, day_of_week}``.
+
+    Prefer ``canonical_category`` for cross-source views (it unifies YNAB + statement categories)."""
     return _tools.summarize_spending(
         _store_cached(),
         source_id=source_id,
@@ -199,6 +201,96 @@ def confirm_batch(batch_id: int) -> dict:  # type: ignore[type-arg]
 def reject_batch(batch_id: int) -> dict:  # type: ignore[type-arg]
     """Delete a pending batch's staged transactions; preserve the batch row."""
     return _tools.reject_batch(_store_cached(), batch_id=batch_id)
+
+
+@mcp.tool()
+def add_category_rule(
+    priority: int,
+    match_field: str,
+    pattern: str,
+    canonical_category: str,
+    is_regex: bool = False,
+    note: str | None = None,
+) -> int:
+    """Append a categorization rule. match_field is 'payee' or 'memo'."""
+    return _tools.add_category_rule(
+        _store_cached(),
+        priority=priority,
+        match_field=match_field,
+        pattern=pattern,
+        is_regex=is_regex,
+        canonical_category=canonical_category,
+        note=note,
+    )
+
+
+@mcp.tool()
+def list_category_rules() -> list[dict]:  # type: ignore[type-arg]
+    """All categorization rules in evaluation order."""
+    return _tools.list_category_rules(_store_cached())
+
+
+@mcp.tool()
+def apply_categorization(source_id: str | None = None) -> dict:  # type: ignore[type-arg]
+    """Re-derive canonical categories for all non-manual rows. Returns counts."""
+    return _tools.apply_categorization(_store_cached(), source_id=source_id)
+
+
+@mcp.tool()
+def suggest_categories(limit: int = 50) -> dict:  # type: ignore[type-arg]
+    """Uncategorized payees + the YNAB category-name set to constrain suggestions."""
+    return _tools.suggest_categories(_store_cached(), limit=limit)
+
+
+@mcp.tool()
+def set_transaction_category(transaction_id: str, canonical_category: str) -> dict:  # type: ignore[type-arg]
+    """Pin one transaction's canonical_category as a sticky manual edit."""
+    return _tools.set_transaction_category(
+        _store_cached(),
+        transaction_id=transaction_id,
+        canonical_category=canonical_category,
+    )
+
+
+@mcp.tool()
+def list_payees(source_id: str | None = None, name_contains: str | None = None) -> list[dict]:  # type: ignore[type-arg]
+    """Distinct payees with transaction counts."""
+    return _tools.list_payees(_store_cached(), source_id=source_id, name_contains=name_contains)
+
+
+@mcp.tool()
+def cash_flow(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    group_by: str = "month",
+    source_id: str | None = None,
+) -> list[dict]:  # type: ignore[type-arg]
+    """Inflow/outflow/net per period (transfers excluded, confirmed-only)."""
+    return _tools.cash_flow(
+        _store_cached(),
+        date_from=date_from,
+        date_to=date_to,
+        group_by=group_by,
+        source_id=source_id,
+    )
+
+
+@mcp.tool()
+def detect_recurring(min_occurrences: int = 3, amount_tolerance_minor: int = 200) -> list[dict]:  # type: ignore[type-arg]
+    """Detected recurring charges + next-occurrence forecast."""
+    return _tools.detect_recurring(
+        _store_cached(),
+        min_occurrences=min_occurrences,
+        amount_tolerance_minor=amount_tolerance_minor,
+    )
+
+
+@mcp.tool()
+def detect_anomalies(trailing_months: int = 6, z_threshold: float = 2.0) -> list[dict]:  # type: ignore[type-arg]
+    """Category-month spend spikes vs a trailing baseline."""
+    return _tools.detect_anomalies(
+        _store_cached(), trailing_months=trailing_months, z_threshold=z_threshold
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover
