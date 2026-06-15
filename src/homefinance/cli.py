@@ -19,6 +19,12 @@ from homefinance.config import YNABBudget, load_config
 from homefinance.db.migrate import migrate
 from homefinance.db.store import Store
 from homefinance.sources.base import AccountSource
+from homefinance.sources.statement.ingest import (
+    AccountAlreadyRegistered,
+)
+from homefinance.sources.statement.ingest import (
+    register_account as _register_statement_account,
+)
 from homefinance.sources.ynab.client import YNABClient
 from homefinance.sources.ynab.source import YNABAccountSource
 from homefinance.sources.ynab.sync import run_sync
@@ -291,4 +297,44 @@ def ynab_remove_budget(
     _secure_write_config(cfg.config_path, _render_config_toml(new_list, include_token=None))
     console.print(
         f"[yellow]Removed[/] budget {budget_id} from config. Existing data in the DB is preserved."
+    )
+
+
+accounts_app = typer.Typer(help="Manage local accounts (e.g., statement-fed).")
+app.add_typer(accounts_app, name="accounts")
+
+
+@accounts_app.command("add")
+def accounts_add(
+    nickname: str = typer.Option(..., "--nickname", "-n"),
+    account_type: str = typer.Option(
+        ...,
+        "--type",
+        "-t",
+        help="checking | savings | credit_card | investment | loan | cash | other",
+    ),
+    currency: str = typer.Option("USD", "--currency"),
+    display_name: str | None = typer.Option(None, "--display-name"),
+) -> None:
+    """Register a statement-fed account in the local store."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        migrate(cfg.db_path)
+    store = Store.open(cfg.db_path)
+    try:
+        ra = _register_statement_account(
+            store,
+            nickname=nickname,
+            type=account_type,
+            currency=currency,
+            display_name=display_name,
+        )
+    except AccountAlreadyRegistered as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(
+        f"[green]Added[/] {ra.source_id} (type: {ra.type}, currency: {ra.currency})"
     )

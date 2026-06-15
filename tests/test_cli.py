@@ -219,3 +219,53 @@ def test_ynab_remove_unknown_budget_errors(
     result = runner.invoke(app, ["ynab", "remove-budget", "--budget-id", "nope"])
     assert result.exit_code != 0
     assert "not found" in result.stdout.lower() or "not found" in (result.stderr or "").lower()
+
+
+def test_accounts_add_creates_source_row(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "accounts",
+            "add",
+            "--nickname",
+            "citi-cc",
+            "--type",
+            "credit_card",
+            "--currency",
+            "USD",
+            "--display-name",
+            "Citi Credit Card",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Added" in result.stdout
+    assert "statement:citi-cc" in result.stdout
+
+    import sqlite3
+
+    with sqlite3.connect(env / "db.sqlite3") as conn:
+        srcs = {r[0] for r in conn.execute("SELECT id FROM sources").fetchall()}
+        accts = {r[0] for r in conn.execute("SELECT id FROM accounts").fetchall()}
+    assert "statement:citi-cc" in srcs
+    assert "statement:citi-cc:account" in accts
+
+
+def test_accounts_add_invalid_type_errors(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    result = runner.invoke(
+        app, ["accounts", "add", "--nickname", "x", "--type", "banana"]
+    )
+    assert result.exit_code != 0
