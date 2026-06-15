@@ -296,3 +296,15 @@ def test_mcp_reject_batch(synced_store: Store, tmp_path: Path) -> None:
     preview = _mcp_ingest_citi_cc(synced_store, tmp_path)
     result = mcp_reject_batch(synced_store, batch_id=preview["batch_id"])
     assert result["review_status"] == "rejected"
+
+
+def test_summarize_spending_by_canonical_category(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    from homefinance.analysis.categorize import apply_categorization
+
+    apply_categorization(synced_store)  # YNAB rows get canonical names
+    rows = summarize_spending(synced_store, group_by="canonical_category")
+    keys = {r["key"] for r in rows}
+    # tiny YNAB fixture has Groceries/Gas categories on its rows
+    assert "Groceries" in keys

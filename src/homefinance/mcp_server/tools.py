@@ -200,7 +200,7 @@ def query_transactions(
 # Aggregations
 
 
-GroupBy = Literal["category", "payee", "month", "account", "day_of_week"]
+GroupBy = Literal["category", "payee", "month", "account", "day_of_week", "canonical_category"]
 
 
 _GROUP_EXPR: dict[str, str] = {
@@ -209,6 +209,7 @@ _GROUP_EXPR: dict[str, str] = {
     "month": "substr(t.date, 1, 7)",
     "account": "a.name",
     "day_of_week": "CAST(strftime('%w', t.date) AS INTEGER)",
+    "canonical_category": "COALESCE(t.canonical_category, '(uncategorized)')",
 }
 
 
