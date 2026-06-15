@@ -5,7 +5,10 @@ import pytest
 from homefinance.analysis.categorize import (
     add_rule,
     apply_categorization,
+    list_payees,
     list_rules,
+    set_manual_category,
+    suggest_categories,
 )
 from homefinance.db.migrate import migrate
 from homefinance.db.store import Store
@@ -236,3 +239,56 @@ def test_apply_regex_rule_matches(store: Store, tmp_path: Path, tiny_fixtures_di
         "WHERE source_id = 'statement:citi-cc' AND payee = 'Payment'"
     ).fetchone()
     assert row["canonical_category"] == "Transfer"
+
+
+def test_suggest_categories_returns_uncategorized_payees_and_ynab_names(
+    store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _seed_mixed_store(store, tmp_path, tiny_fixtures_dir)
+    apply_categorization(store)  # YNAB rows categorized; statement rows not.
+    out = suggest_categories(store)
+    payees = {p["payee"] for p in out["uncategorized_payees"]}
+    assert "Trader Joe's" in payees  # statement row, no rule yet
+    assert "Groceries" in out["ynab_category_names"]  # constrain-to set
+
+
+def test_set_manual_category_pins_a_row(
+    store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _seed_mixed_store(store, tmp_path, tiny_fixtures_dir)
+    apply_categorization(store)
+    txn_id = store.execute(
+        "SELECT id FROM transactions WHERE source_id = 'statement:citi-cc' "
+        'AND payee = "Trader Joe\'s" LIMIT 1'
+    ).fetchone()["id"]
+    result = set_manual_category(store, transaction_id=txn_id, canonical_category="Groceries")
+    assert result["category_source"] == "manual"
+    row = store.execute(
+        "SELECT canonical_category, category_source FROM transactions WHERE id = ?",
+        (txn_id,),
+    ).fetchone()
+    assert row["canonical_category"] == "Groceries"
+    assert row["category_source"] == "manual"
+
+
+def test_set_manual_category_unknown_id_raises(store: Store) -> None:
+    with pytest.raises(KeyError, match="not found"):
+        set_manual_category(store, transaction_id="nope", canonical_category="X")
+
+
+def test_list_payees_returns_distinct_with_counts(
+    store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _seed_mixed_store(store, tmp_path, tiny_fixtures_dir)
+    payees = list_payees(store)
+    names = {p["payee"] for p in payees}
+    assert "Trader Joe's" in names
+    assert all("txn_count" in p for p in payees)
+
+
+def test_list_payees_filters_by_substring(
+    store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _seed_mixed_store(store, tmp_path, tiny_fixtures_dir)
+    payees = list_payees(store, name_contains="Trader")
+    assert payees and all("Trader" in p["payee"] for p in payees)

@@ -152,3 +152,80 @@ def apply_categorization(store: Store, *, source_id: str | None = None) -> dict[
     for r in rows:
         counts[r["src"]] = int(r["n"])
     return counts
+
+
+def suggest_categories(store: Store, *, limit: int = 50) -> dict[str, Any]:
+    """Distinct uncategorized payees (+ a sample row id each) plus the set of
+    existing YNAB category names, so a caller (Claude) can propose labels
+    constrained to the user's own taxonomy.
+    """
+    payee_rows = store.execute(
+        "SELECT payee, COUNT(*) AS n, MIN(id) AS sample_id FROM transactions "
+        "WHERE deleted = 0 AND is_split_parent = 0 AND canonical_category IS NULL "
+        "AND payee IS NOT NULL AND payee != '' "
+        "GROUP BY payee ORDER BY n DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    name_rows = store.execute(
+        "SELECT DISTINCT name FROM categories WHERE deleted = 0 ORDER BY name"
+    ).fetchall()
+    return {
+        "uncategorized_payees": [
+            {
+                "payee": r["payee"],
+                "txn_count": int(r["n"]),
+                "sample_transaction_id": r["sample_id"],
+            }
+            for r in payee_rows
+        ],
+        "ynab_category_names": [r["name"] for r in name_rows],
+    }
+
+
+def set_manual_category(
+    store: Store, *, transaction_id: str, canonical_category: str
+) -> dict[str, Any]:
+    """Pin a single transaction's canonical_category as a sticky manual edit."""
+    if not canonical_category:
+        raise ValueError("canonical_category must be non-empty")
+    exists = store.execute("SELECT 1 FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    if exists is None:
+        raise KeyError(f"transaction {transaction_id!r} not found")
+    with store.transaction():
+        store.execute(
+            "UPDATE transactions SET canonical_category = ?, category_source = 'manual' "
+            "WHERE id = ?",
+            (canonical_category, transaction_id),
+        )
+    return {
+        "transaction_id": transaction_id,
+        "canonical_category": canonical_category,
+        "category_source": "manual",
+    }
+
+
+def list_payees(
+    store: Store, *, source_id: str | None = None, name_contains: str | None = None
+) -> list[dict[str, Any]]:
+    """Distinct payees with transaction counts (Leaves view, confirmed-only)."""
+    where = [
+        "deleted = 0",
+        "is_split_parent = 0",
+        "status = 'confirmed'",
+        "payee IS NOT NULL",
+        "payee != ''",
+    ]
+    params: list[Any] = []
+    if source_id is not None:
+        where.append("source_id = ?")
+        params.append(source_id)
+    if name_contains is not None:
+        where.append("payee LIKE ?")
+        params.append(f"%{name_contains}%")
+    rows = store.execute(
+        "SELECT payee, COUNT(*) AS n FROM transactions WHERE "
+        + " AND ".join(where)
+        + " GROUP BY payee ORDER BY n DESC, payee",
+        params,
+    ).fetchall()
+    return [{"payee": r["payee"], "txn_count": int(r["n"])} for r in rows]
