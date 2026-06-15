@@ -178,9 +178,7 @@ def test_apply_fills_statement_rows_from_rules(
     assert all(r["category_source"] == "rule" for r in rows)
 
 
-def test_apply_is_idempotent(
-    store: Store, tmp_path: Path, tiny_fixtures_dir: Path
-) -> None:
+def test_apply_is_idempotent(store: Store, tmp_path: Path, tiny_fixtures_dir: Path) -> None:
     _seed_mixed_store(store, tmp_path, tiny_fixtures_dir)
     add_rule(
         store,
@@ -222,9 +220,7 @@ def test_apply_respects_manual_then_reapplies_rules(
     assert row["category_source"] == "manual"
 
 
-def test_apply_regex_rule_matches(
-    store: Store, tmp_path: Path, tiny_fixtures_dir: Path
-) -> None:
+def test_apply_regex_rule_matches(store: Store, tmp_path: Path, tiny_fixtures_dir: Path) -> None:
     _seed_mixed_store(store, tmp_path, tiny_fixtures_dir)
     add_rule(
         store,
