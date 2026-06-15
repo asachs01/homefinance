@@ -115,7 +115,9 @@ def summarize_spending(
     cleared: str | None = None,
     group_by: str = "category",
 ) -> list[dict]:  # type: ignore[type-arg]
-    """Aggregate spending. ``group_by ∈ {category, payee, month, account, day_of_week}``."""
+    """Aggregate spending. ``group_by ∈ {category, canonical_category, payee, month, account, day_of_week}``.
+
+    Prefer ``canonical_category`` for cross-source views (it unifies YNAB + statement categories)."""
     return _tools.summarize_spending(
         _store_cached(),
         source_id=source_id,
