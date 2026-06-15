@@ -5,10 +5,25 @@ with ``@mcp.tool()`` decorators in ``__main__.py``.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Literal
 
 from homefinance.db.store import Store
 from homefinance.sources.base import AccountSource
+from homefinance.sources.statement.ingest import (
+    confirm_batch as _confirm_batch_lib,
+)
+from homefinance.sources.statement.ingest import (
+    ingest_file as _ingest_file_lib,
+)
+from homefinance.sources.statement.ingest import (
+    list_batches as _list_batches_lib,
+)
+from homefinance.sources.statement.ingest import (
+    reject_batch as _reject_batch_lib,
+)
+from homefinance.sources.statement.parsers.base import StatementIngestError
 from homefinance.sources.ynab.sync import SyncRunResult, run_sync
 
 Mode = Literal["leaves", "tops"]
@@ -318,20 +333,6 @@ def sync_ynab_one(store: Store, source: AccountSource) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Statement ingest
 
-from dataclasses import asdict  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-from homefinance.sources.statement.ingest import BatchPreview  # noqa: E402
-from homefinance.sources.statement.ingest import confirm_batch as _confirm_batch_lib  # noqa: E402
-from homefinance.sources.statement.ingest import ingest_file as _ingest_file_lib  # noqa: E402
-from homefinance.sources.statement.ingest import list_batches as _list_batches_lib  # noqa: E402
-from homefinance.sources.statement.ingest import reject_batch as _reject_batch_lib  # noqa: E402
-from homefinance.sources.statement.parsers.base import StatementIngestError  # noqa: E402
-
-
-def _preview_to_dict(p: BatchPreview) -> dict[str, Any]:
-    return asdict(p)
-
 
 def ingest_statement(
     store: Store,
@@ -358,7 +359,7 @@ def ingest_statement(
         )
     except StatementIngestError as e:
         return {"error": e.code, "message": str(e)}
-    return _preview_to_dict(preview)
+    return asdict(preview)
 
 
 def list_batches(

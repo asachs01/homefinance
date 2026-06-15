@@ -169,13 +169,13 @@ def ingest_statement(
     archive: bool = True,
 ) -> dict:  # type: ignore[type-arg]
     """Parse + stage one statement file. Returns the BatchPreview as a dict."""
-    cfg = _cfg_cached()
+    cfg_dir = _cfg_cached().config_path.parent
     return _tools.ingest_statement(
         _store_cached(),
         path=path,
         account_nickname=account_nickname,
-        config_dir=str(cfg.config_path.parent),
-        archive_dir=str(cfg.config_path.parent / "archive"),
+        config_dir=str(cfg_dir),
+        archive_dir=str(cfg_dir / "archive"),
         archive=archive,
     )
 
