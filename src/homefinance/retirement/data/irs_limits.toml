@@ -3,13 +3,15 @@
 # VERIFY against the cited IRS source before relying on these (see C-17).
 
 [2025]
-source = "IRS Rev. Proc. 2024-25 (HSA) + Notice 2024-80 (IRA/Roth) — verify at irs.gov"
+# IRA/Roth: IRS news release IR-2024-285 (Nov 1, 2024) — https://www.irs.gov/newsroom/401k-limit-increases-to-23500-for-2025-ira-limit-remains-7000
+# HSA: IRS Rev. Proc. 2024-25 — https://www.irs.gov/pub/irs-drop/rp-24-25.pdf
+source = "IRS IR-2024-285 (IRA/Roth) + Rev. Proc. 2024-25 (HSA), verified 2026-06-15"
 ira_limit_minor      = 700000     # $7,000 combined Traditional + Roth
 ira_catchup_minor    = 100000     # +$1,000 at age >= 50
 ira_catchup_age      = 50
 hsa_self_only_minor  = 430000     # $4,300
 hsa_family_minor     = 855000     # $8,550
-hsa_catchup_minor    = 100000     # +$1,000 at age >= 55
+hsa_catchup_minor    = 100000     # +$1,000 at age >= 55 (statutory, IRC 223(b)(3))
 hsa_catchup_age      = 55
 
 [2025.roth_phaseout.single]
@@ -21,5 +23,30 @@ low_minor  = 23600000             # $236,000
 high_minor = 24600000             # $246,000
 
 [2025.roth_phaseout.married_separately]
+low_minor  = 0
+high_minor = 1000000              # $10,000
+
+[2026]
+# IRA/Roth: IRS news release IR-2025-111 (Nov 13, 2025) — https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500
+#           (figures also in IRS Notice 2025-67 — https://www.irs.gov/pub/irs-drop/n-25-67.pdf)
+# HSA: IRS Rev. Proc. 2025-19 — https://www.irs.gov/pub/irs-drop/rp-25-19.pdf
+source = "IRS IR-2025-111 (IRA/Roth) + Rev. Proc. 2025-19 (HSA), verified 2026-06-15"
+ira_limit_minor      = 750000     # $7,500 combined Traditional + Roth
+ira_catchup_minor    = 110000     # +$1,100 at age >= 50
+ira_catchup_age      = 50
+hsa_self_only_minor  = 440000     # $4,400
+hsa_family_minor     = 875000     # $8,750
+hsa_catchup_minor    = 100000     # +$1,000 at age >= 55 (statutory, IRC 223(b)(3))
+hsa_catchup_age      = 55
+
+[2026.roth_phaseout.single]
+low_minor  = 15300000             # $153,000  (also used for head_of_household)
+high_minor = 16800000             # $168,000
+
+[2026.roth_phaseout.married_jointly]
+low_minor  = 24200000             # $242,000
+high_minor = 25200000             # $252,000
+
+[2026.roth_phaseout.married_separately]
 low_minor  = 0
 high_minor = 1000000              # $10,000

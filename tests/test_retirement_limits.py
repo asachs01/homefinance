@@ -31,3 +31,24 @@ def test_available_years_includes_2025() -> None:
     from homefinance.retirement.limits import available_years
 
     assert 2025 in available_years()
+
+
+def test_load_limits_2026_is_structurally_complete() -> None:
+    from homefinance.retirement.limits import available_years
+
+    lim = load_limits(2026)
+    for key in (
+        "ira_limit_minor",
+        "ira_catchup_minor",
+        "ira_catchup_age",
+        "hsa_self_only_minor",
+        "hsa_family_minor",
+        "hsa_catchup_minor",
+        "hsa_catchup_age",
+        "source",
+    ):
+        assert key in lim, f"2026 missing {key}"
+    for band in ("single", "married_jointly", "married_separately"):
+        assert lim["roth_phaseout"][band]["low_minor"] >= 0
+        assert lim["roth_phaseout"][band]["high_minor"] > lim["roth_phaseout"][band]["low_minor"]
+    assert 2026 in available_years()
