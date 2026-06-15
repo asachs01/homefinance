@@ -126,14 +126,18 @@ tests/integration/test_docling_live.py    ← new (manual-dispatch CI only)
 
 ```toml
 [project.optional-dependencies]
+ofx = [
+    "ofxtools>=0.10",     # OFX + QFX parsing — pure-Python, no torch
+]
 ingest = [
-    "docling>=2.0",       # PDF/image extraction (PyTorch + ~200MB models)
     "ofxtools>=0.10",     # OFX + QFX parsing
+    "docling>=2.0",       # PDF/image extraction (PyTorch + ~200MB models)
 ]
 ```
 
 - `pip install homefinance` → YNAB-only, lean. CSV parser still works (stdlib only).
-- `pip install homefinance[ingest]` → full statement support.
+- `pip install homefinance[ofx]` → adds OFX/QFX (lightweight; no torch). Default CI installs this so OFX/QFX tests run on every PR without the Docling stack.
+- `pip install homefinance[ingest]` → full statement support (OFX/QFX + Docling PDF).
 - **Parsers are lazy-imported by the registry** — `docling_pdf.py` and `ofx.py` are imported only on first dispatch to them, not at package import time. The lean install never triggers `ImportError`.
 - A subprocess-based test (§ 10.5) enforces the lazy-import discipline by asserting `docling` does not appear in `sys.modules` after importing the package.
 
@@ -493,7 +497,7 @@ This is the contract that the lean install stays lean. Any future top-level `imp
 
 | Job | Trigger | Installs | Runs |
 |---|---|---|---|
-| `test` *(existing, edited)* | push + PR to main | `pip install -e ".[dev]"` (no `ingest`) | Tiers 1, 2 (via `FakeDoclingPDFParser`), 3 |
+| `test` *(existing, edited)* | push + PR to main | `pip install -e ".[dev,ofx]"` (lightweight OFX/QFX; no Docling/torch) | Tiers 1, 2 (via `FakeDoclingPDFParser`), 3 |
 | `test-docling` *(new)* | `workflow_dispatch` only | `pip install -e ".[dev,ingest]"` | `pytest tests/integration -m docling` |
 
 Default CI stays under a minute. Live-Docling job runs on demand.
