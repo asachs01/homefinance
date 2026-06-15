@@ -4,12 +4,39 @@ import pytest
 
 from homefinance.db.store import Store
 from homefinance.mcp_server.tools import (
+    add_category_rule as mcp_add_category_rule,
+)
+from homefinance.mcp_server.tools import (
+    apply_categorization as mcp_apply_categorization,
+)
+from homefinance.mcp_server.tools import (
+    cash_flow as mcp_cash_flow,
+)
+from homefinance.mcp_server.tools import (
+    detect_anomalies as mcp_detect_anomalies,
+)
+from homefinance.mcp_server.tools import (
+    detect_recurring as mcp_detect_recurring,
+)
+from homefinance.mcp_server.tools import (
     get_account,
     list_accounts,
     list_categories,
     list_sources,
     query_transactions,
     summarize_spending,
+)
+from homefinance.mcp_server.tools import (
+    list_category_rules as mcp_list_category_rules,
+)
+from homefinance.mcp_server.tools import (
+    list_payees as mcp_list_payees,
+)
+from homefinance.mcp_server.tools import (
+    set_transaction_category as mcp_set_transaction_category,
+)
+from homefinance.mcp_server.tools import (
+    suggest_categories as mcp_suggest_categories,
 )
 from homefinance.sources.ynab.fake_client import FakeYNABClient
 from homefinance.sources.ynab.source import YNABAccountSource
@@ -308,3 +335,44 @@ def test_summarize_spending_by_canonical_category(
     keys = {r["key"] for r in rows}
     # tiny YNAB fixture has Groceries/Gas categories on its rows
     assert "Groceries" in keys
+
+
+def test_mcp_add_and_list_category_rules(synced_store: Store) -> None:
+    rid = mcp_add_category_rule(
+        synced_store,
+        priority=10,
+        match_field="payee",
+        pattern="Shell",
+        is_regex=False,
+        canonical_category="Gas",
+    )
+    assert rid >= 1
+    rules = mcp_list_category_rules(synced_store)
+    assert any(r["pattern"] == "Shell" for r in rules)
+
+
+def test_mcp_apply_categorization_counts(synced_store: Store) -> None:
+    result = mcp_apply_categorization(synced_store)
+    assert set(result) >= {"ynab", "rule", "manual", "uncategorized"}
+
+
+def test_mcp_suggest_and_set_and_list_payees(synced_store: Store) -> None:
+    mcp_apply_categorization(synced_store)
+    out = mcp_suggest_categories(synced_store)
+    assert "ynab_category_names" in out
+    payees = mcp_list_payees(synced_store)
+    assert isinstance(payees, list)
+
+
+def test_mcp_cash_flow_recurring_anomaly_callable(synced_store: Store) -> None:
+    assert isinstance(mcp_cash_flow(synced_store), list)
+    assert isinstance(mcp_detect_recurring(synced_store), list)
+    assert isinstance(mcp_detect_anomalies(synced_store), list)
+
+
+def test_mcp_set_transaction_category(synced_store: Store) -> None:
+    txn_id = synced_store.execute("SELECT id FROM transactions LIMIT 1").fetchone()["id"]
+    result = mcp_set_transaction_category(
+        synced_store, transaction_id=txn_id, canonical_category="Groceries"
+    )
+    assert result["category_source"] == "manual"
