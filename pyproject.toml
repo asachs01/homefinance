@@ -81,6 +81,14 @@ warn_unused_configs = true
 module = ["yoyo.*"]
 ignore_missing_imports = true
 
+# docling/ofxtools live in optional extras and are lazy-imported. Default CI
+# typechecks with only [dev,ofx] installed (no Docling), so mypy must not error
+# when it can't resolve these modules. The flag is a no-op when they ARE present
+# (e.g. the full [ingest] dev venv), so it stays correct in both environments.
+[[tool.mypy.overrides]]
+module = ["docling.*", "ofxtools.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config --ignore=tests/integration"
 testpaths = ["tests"]
