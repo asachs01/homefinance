@@ -246,3 +246,85 @@ def test_get_sync_status_includes_pending_batch_count(
     by_id = {s["source_id"]: s for s in statuses}
     assert "pending_batch_count" in by_id["statement:citi-cc"]
     assert by_id["statement:citi-cc"]["pending_batch_count"] == 1
+
+
+from homefinance.mcp_server.tools import confirm_batch as mcp_confirm_batch  # noqa: E402
+from homefinance.mcp_server.tools import ingest_statement as mcp_ingest_statement  # noqa: E402
+from homefinance.mcp_server.tools import list_batches as mcp_list_batches  # noqa: E402
+from homefinance.mcp_server.tools import reject_batch as mcp_reject_batch  # noqa: E402
+
+
+def test_mcp_ingest_statement_returns_preview_dict(synced_store: Store, tmp_path: Path) -> None:
+    register_account(synced_store, nickname="citi-cc", type="credit_card", currency="USD")
+    cfg_dir = tmp_path / "homefinance"
+    (cfg_dir / "templates").mkdir(parents=True)
+    (cfg_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    result = mcp_ingest_statement(
+        synced_store,
+        path=str(fixture),
+        account_nickname="citi-cc",
+        config_dir=str(cfg_dir),
+        archive_dir=str(tmp_path / "archive"),
+        archive=True,
+    )
+    assert result["batch_id"] >= 1
+    assert result["txn_count"] == 3
+    assert "first_transactions" in result
+
+
+def test_mcp_list_batches(synced_store: Store) -> None:
+    rows = mcp_list_batches(synced_store, review_status="pending")
+    assert isinstance(rows, list)
+
+
+def test_mcp_confirm_batch(synced_store: Store, tmp_path: Path) -> None:
+    register_account(synced_store, nickname="citi-cc", type="credit_card", currency="USD")
+    cfg_dir = tmp_path / "homefinance"
+    (cfg_dir / "templates").mkdir(parents=True)
+    (cfg_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    preview = mcp_ingest_statement(
+        synced_store,
+        path=str(fixture),
+        account_nickname="citi-cc",
+        config_dir=str(cfg_dir),
+        archive_dir=str(tmp_path / "archive"),
+    )
+    result = mcp_confirm_batch(synced_store, batch_id=preview["batch_id"])
+    assert result["review_status"] == "confirmed"
+
+
+def test_mcp_reject_batch(synced_store: Store, tmp_path: Path) -> None:
+    register_account(synced_store, nickname="citi-cc", type="credit_card", currency="USD")
+    cfg_dir = tmp_path / "homefinance"
+    (cfg_dir / "templates").mkdir(parents=True)
+    (cfg_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    preview = mcp_ingest_statement(
+        synced_store,
+        path=str(fixture),
+        account_nickname="citi-cc",
+        config_dir=str(cfg_dir),
+        archive_dir=str(tmp_path / "archive"),
+    )
+    result = mcp_reject_batch(synced_store, batch_id=preview["batch_id"])
+    assert result["review_status"] == "rejected"

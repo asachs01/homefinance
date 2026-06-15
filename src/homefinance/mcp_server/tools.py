@@ -313,3 +313,66 @@ def sync_ynab_all(store: Store, sources: list[AccountSource]) -> list[dict[str, 
 
 def sync_ynab_one(store: Store, source: AccountSource) -> dict[str, Any]:
     return _result_to_dict(run_sync(source, store))
+
+
+# ---------------------------------------------------------------------------
+# Statement ingest
+
+from dataclasses import asdict  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from homefinance.sources.statement.ingest import BatchPreview  # noqa: E402
+from homefinance.sources.statement.ingest import confirm_batch as _confirm_batch_lib  # noqa: E402
+from homefinance.sources.statement.ingest import ingest_file as _ingest_file_lib  # noqa: E402
+from homefinance.sources.statement.ingest import list_batches as _list_batches_lib  # noqa: E402
+from homefinance.sources.statement.ingest import reject_batch as _reject_batch_lib  # noqa: E402
+from homefinance.sources.statement.parsers.base import StatementIngestError  # noqa: E402
+
+
+def _preview_to_dict(p: BatchPreview) -> dict[str, Any]:
+    return asdict(p)
+
+
+def ingest_statement(
+    store: Store,
+    *,
+    path: str,
+    account_nickname: str,
+    config_dir: str,
+    archive_dir: str,
+    archive: bool = True,
+) -> dict[str, Any]:
+    """Parse + stage a statement file. Returns a BatchPreview dict.
+
+    Does not prompt; the caller (usually Claude) is expected to inspect the
+    preview, decide, and call ``confirm_batch`` or ``reject_batch``.
+    """
+    try:
+        preview = _ingest_file_lib(
+            store,
+            path=Path(path),
+            account_nickname=account_nickname,
+            config_dir=Path(config_dir),
+            archive_dir=Path(archive_dir),
+            archive=archive,
+        )
+    except StatementIngestError as e:
+        return {"error": e.code, "message": str(e)}
+    return _preview_to_dict(preview)
+
+
+def list_batches(
+    store: Store,
+    *,
+    source_id: str | None = None,
+    review_status: str | None = "pending",
+) -> list[dict[str, Any]]:
+    return _list_batches_lib(store, source_id=source_id, review_status=review_status)
+
+
+def confirm_batch(store: Store, *, batch_id: int) -> dict[str, Any]:
+    return _confirm_batch_lib(store, batch_id)
+
+
+def reject_batch(store: Store, *, batch_id: int) -> dict[str, Any]:
+    return _reject_batch_lib(store, batch_id)

@@ -162,5 +162,44 @@ def sync_ynab(source_id: str | None = None) -> list[dict]:  # type: ignore[type-
     return _tools.sync_ynab_all(_store_cached(), [_cast(_AccountSource, s) for s in sources])
 
 
+@mcp.tool()
+def ingest_statement(
+    path: str,
+    account_nickname: str,
+    archive: bool = True,
+) -> dict:  # type: ignore[type-arg]
+    """Parse + stage one statement file. Returns the BatchPreview as a dict."""
+    cfg = _cfg_cached()
+    return _tools.ingest_statement(
+        _store_cached(),
+        path=path,
+        account_nickname=account_nickname,
+        config_dir=str(cfg.config_path.parent),
+        archive_dir=str(cfg.config_path.parent / "archive"),
+        archive=archive,
+    )
+
+
+@mcp.tool()
+def list_batches(
+    source_id: str | None = None,
+    review_status: str = "pending",
+) -> list[dict]:  # type: ignore[type-arg]
+    """List statement batches in the local store."""
+    return _tools.list_batches(_store_cached(), source_id=source_id, review_status=review_status)
+
+
+@mcp.tool()
+def confirm_batch(batch_id: int) -> dict:  # type: ignore[type-arg]
+    """Promote a pending batch's transactions to status='confirmed'."""
+    return _tools.confirm_batch(_store_cached(), batch_id=batch_id)
+
+
+@mcp.tool()
+def reject_batch(batch_id: int) -> dict:  # type: ignore[type-arg]
+    """Delete a pending batch's staged transactions; preserve the batch row."""
+    return _tools.reject_batch(_store_cached(), batch_id=batch_id)
+
+
 if __name__ == "__main__":  # pragma: no cover
     mcp.run()
