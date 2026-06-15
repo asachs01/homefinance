@@ -444,3 +444,57 @@ def test_categorize_rules_add_invalid_field_errors(env: Path) -> None:
         ["categorize", "rules", "add", "--field", "banana", "--pattern", "x", "--category", "Y"],
     )
     assert result.exit_code != 0
+
+
+def test_retirement_summary_no_config(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    result = runner.invoke(app, ["retirement", "summary", "--tax-year", "2025"])
+    assert result.exit_code == 0
+    assert "retirement" in result.stdout.lower()
+
+
+def test_retirement_summary_with_config(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    # Append a [retirement] section to the config the env fixture points at.
+    cfg_path = env / "config.toml"
+    cfg_path.write_text(
+        cfg_path.read_text()
+        + '\n[retirement]\nbirth_year = 1985\nfiling_status = "single"\n'
+        + 'magi_minor = 14000000\nhsa_coverage = "family"\n'
+        + "[retirement.contributed]\ntraditional_ira_minor = 200000\n"
+        + "roth_ira_minor = 100000\nhsa_minor = 300000\n"
+    )
+    result = runner.invoke(app, ["retirement", "summary", "--tax-year", "2025"])
+    assert result.exit_code == 0, result.stdout
+    assert "IRA" in result.stdout
+    assert "not financial" in result.stdout.lower()  # disclaimer printed
+
+
+def test_retirement_summary_unknown_year_errors(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    # A valid [retirement] profile is required to reach the limits lookup; the
+    # error under test is "no IRS limit data for this year", not "no profile".
+    cfg_path = env / "config.toml"
+    cfg_path.write_text(
+        cfg_path.read_text()
+        + '\n[retirement]\nbirth_year = 1985\nfiling_status = "single"\n'
+        + 'magi_minor = 14000000\nhsa_coverage = "family"\n'
+        + "[retirement.contributed]\ntraditional_ira_minor = 0\n"
+    )
+    result = runner.invoke(app, ["retirement", "summary", "--tax-year", "1999"])
+    assert result.exit_code != 0

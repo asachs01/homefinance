@@ -27,6 +27,7 @@ from homefinance.analysis.categorize import (
 from homefinance.config import YNABBudget, load_config
 from homefinance.db.migrate import migrate
 from homefinance.db.store import Store
+from homefinance.mcp_server.tools import retirement_summary as _retirement_summary_tool
 from homefinance.sources.base import AccountSource
 from homefinance.sources.statement.ingest import (
     AccountAlreadyRegistered,
@@ -604,3 +605,67 @@ def categorize_rules_list() -> None:
             r["canonical_category"],
         )
     console.print(table)
+
+
+retirement_app = typer.Typer(help="Retirement contribution headroom & opportunities.")
+app.add_typer(retirement_app, name="retirement")
+
+
+@retirement_app.command("summary")
+def retirement_summary_cmd(
+    tax_year: int = typer.Option(..., "--tax-year"),
+    magi: int | None = typer.Option(None, "--magi", help="MAGI in whole dollars (override)."),
+) -> None:
+    """Show per-account contribution headroom for the tax year."""
+    cfg = load_config()
+    raw = None
+    if cfg.config_path.exists():
+        import tomllib
+
+        raw = tomllib.loads(cfg.config_path.read_text()).get("retirement")
+
+    magi_override = magi * 100 if magi is not None else None
+    out = _retirement_summary_tool(
+        tax_year=tax_year, retirement_cfg=raw, magi_override_minor=magi_override
+    )
+
+    if out.get("error") == "no_limit_data":
+        err_console.print(f"[red]{out['message']}[/]")
+        raise typer.Exit(code=1)
+    if "message" in out and "ira" not in out:
+        console.print(f"[yellow]{out['message']}[/]")
+        console.print(f"\n[dim]{out['disclaimer']}[/]")
+        return
+
+    table = Table(title=f"Retirement headroom — tax year {out['tax_year']} (age {out['age']})")
+    table.add_column("account")
+    table.add_column("limit", justify="right")
+    table.add_column("contributed", justify="right")
+    table.add_column("remaining", justify="right")
+    ira = out["ira"]
+    table.add_row(
+        "IRA (Trad+Roth)",
+        f"${ira['limit_minor'] / 100:,.0f}",
+        f"${ira['contributed_minor'] / 100:,.0f}",
+        f"${ira['remaining_minor'] / 100:,.0f}",
+    )
+    hsa = out["hsa"]
+    if hsa is not None:
+        table.add_row(
+            f"HSA ({hsa['coverage']})",
+            f"${hsa['limit_minor'] / 100:,.0f}",
+            f"${hsa['contributed_minor'] / 100:,.0f}",
+            f"${hsa['remaining_minor'] / 100:,.0f}",
+        )
+    console.print(table)
+
+    roth = out["roth"]
+    console.print(
+        f"Roth eligibility: [bold]{roth['status']}[/]"
+        + (f" (limit ${roth['roth_limit_minor'] / 100:,.0f})" if "roth_limit_minor" in roth else "")
+    )
+    if out["opportunities"]:
+        console.print(f"\n[green]Unused headroom[/] (deadline {out['deadline']}):")
+        for o in out["opportunities"]:
+            console.print(f"  • {o['account']}: ${o['remaining_minor'] / 100:,.0f}")
+    console.print(f"\n[dim]{out['disclaimer']}[/]")
