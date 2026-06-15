@@ -19,6 +19,15 @@ from homefinance.analysis.categorize import set_manual_category as _set_manual_c
 from homefinance.analysis.categorize import suggest_categories as _suggest_categories_lib
 from homefinance.analysis.recurring import detect_recurring as _detect_recurring_lib
 from homefinance.db.store import Store
+from homefinance.retirement.compute import DISCLAIMER as _DISCLAIMER
+from homefinance.retirement.compute import contribution_deadline as _contribution_deadline
+from homefinance.retirement.compute import hsa_headroom as _hsa_headroom
+from homefinance.retirement.compute import ira_headroom as _ira_headroom
+from homefinance.retirement.compute import opportunities as _opportunities
+from homefinance.retirement.compute import roth_eligibility as _roth_eligibility
+from homefinance.retirement.inputs import parse_retirement as _parse_retirement
+from homefinance.retirement.limits import LimitsNotFound as _LimitsNotFound
+from homefinance.retirement.limits import load_limits as _load_limits
 from homefinance.sources.base import AccountSource
 from homefinance.sources.statement.ingest import (
     confirm_batch as _confirm_batch_lib,
@@ -473,3 +482,101 @@ def detect_anomalies(
     store: Store, *, trailing_months: int = 6, z_threshold: float = 2.0
 ) -> list[dict[str, Any]]:
     return _detect_anomalies_lib(store, trailing_months=trailing_months, z_threshold=z_threshold)
+
+
+# ---------------------------------------------------------------------------
+# Retirement
+
+
+def contribution_limits(*, tax_year: int) -> dict[str, Any]:
+    """Raw IRS limits for a tax year (with source + disclaimer), or an error dict."""
+    try:
+        lim = _load_limits(tax_year)
+    except _LimitsNotFound as e:
+        return {"error": e.code, "message": str(e)}
+    return {
+        "tax_year": tax_year,
+        "ira_limit_minor": lim["ira_limit_minor"],
+        "ira_catchup_minor": lim["ira_catchup_minor"],
+        "ira_catchup_age": lim["ira_catchup_age"],
+        "hsa_self_only_minor": lim["hsa_self_only_minor"],
+        "hsa_family_minor": lim["hsa_family_minor"],
+        "hsa_catchup_minor": lim["hsa_catchup_minor"],
+        "hsa_catchup_age": lim["hsa_catchup_age"],
+        "roth_phaseout": lim["roth_phaseout"],
+        "source": lim["source"],
+        "disclaimer": _DISCLAIMER,
+    }
+
+
+def roth_eligibility(
+    *, tax_year: int, filing_status: str, magi_minor: int, age: int = 40
+) -> dict[str, Any]:
+    """Roth phase-out status + reduced limit for a tax year, or an error dict."""
+    try:
+        lim = _load_limits(tax_year)
+    except _LimitsNotFound as e:
+        return {"error": e.code, "message": str(e)}
+    out = _roth_eligibility(filing_status=filing_status, magi_minor=magi_minor, age=age, limits=lim)
+    out["disclaimer"] = _DISCLAIMER
+    return out
+
+
+def retirement_summary(
+    *,
+    tax_year: int,
+    retirement_cfg: dict[str, Any] | None,
+    magi_override_minor: int | None = None,
+    age_override: int | None = None,
+) -> dict[str, Any]:
+    """Full per-account headroom + opportunities for the tax year.
+
+    ``retirement_cfg`` is the raw ``[retirement]`` config dict (or None). The
+    MCP wrapper loads it from config; tests pass it directly.
+    """
+    cfg = _parse_retirement(retirement_cfg)
+    if cfg is None:
+        return {
+            "message": "No retirement profile configured. Add a [retirement] section "
+            "to ~/.homefinance/config.toml (birth_year, filing_status, "
+            "magi_minor, hsa_coverage, [retirement.contributed]).",
+            "disclaimer": _DISCLAIMER,
+        }
+    try:
+        lim = _load_limits(tax_year)
+    except _LimitsNotFound as e:
+        return {"error": e.code, "message": str(e)}
+
+    age = age_override if age_override is not None else cfg.age_in(tax_year)
+    magi = magi_override_minor if magi_override_minor is not None else cfg.magi_minor
+
+    ira = _ira_headroom(
+        age=age,
+        trad_contributed_minor=cfg.contributed.traditional_ira_minor,
+        roth_contributed_minor=cfg.contributed.roth_ira_minor,
+        limits=lim,
+    )
+    hsa = _hsa_headroom(
+        age=age,
+        hsa_coverage=cfg.hsa_coverage,
+        hsa_contributed_minor=cfg.contributed.hsa_minor,
+        limits=lim,
+    )
+    roth: dict[str, Any] = (
+        _roth_eligibility(filing_status=cfg.filing_status, magi_minor=magi, age=age, limits=lim)
+        if magi is not None
+        else {"status": "unknown", "message": "MAGI needed to assess Roth eligibility"}
+    )
+
+    return {
+        "tax_year": tax_year,
+        "age": age,
+        "filing_status": cfg.filing_status,
+        "ira": ira,
+        "roth": roth,
+        "hsa": hsa,
+        "deadline": _contribution_deadline(tax_year),
+        "opportunities": _opportunities(tax_year=tax_year, ira=ira, hsa=hsa),
+        "source": lim["source"],
+        "disclaimer": _DISCLAIMER,
+    }

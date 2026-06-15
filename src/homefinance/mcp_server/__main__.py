@@ -293,5 +293,40 @@ def detect_anomalies(trailing_months: int = 6, z_threshold: float = 2.0) -> list
     )
 
 
+@mcp.tool()
+def contribution_limits(tax_year: int) -> dict:  # type: ignore[type-arg]
+    """IRS contribution limits for a tax year (IRA / Roth bands / HSA) with source + disclaimer."""
+    return _tools.contribution_limits(tax_year=tax_year)
+
+
+@mcp.tool()
+def roth_eligibility(tax_year: int, filing_status: str, magi_minor: int, age: int = 40) -> dict:  # type: ignore[type-arg]
+    """Roth IRA MAGI phase-out status + reduced contribution limit for a tax year."""
+    return _tools.roth_eligibility(
+        tax_year=tax_year, filing_status=filing_status, magi_minor=magi_minor, age=age
+    )
+
+
+@mcp.tool()
+def retirement_summary(
+    tax_year: int,
+    magi_override_minor: int | None = None,
+    age_override: int | None = None,
+) -> dict:  # type: ignore[type-arg]
+    """Per-account contribution headroom + opportunities, read from the [retirement] config."""
+    cfg = _cfg_cached()
+    raw = None
+    if cfg.config_path.exists():
+        import tomllib
+
+        raw = tomllib.loads(cfg.config_path.read_text()).get("retirement")
+    return _tools.retirement_summary(
+        tax_year=tax_year,
+        retirement_cfg=raw,
+        magi_override_minor=magi_override_minor,
+        age_override=age_override,
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     mcp.run()
