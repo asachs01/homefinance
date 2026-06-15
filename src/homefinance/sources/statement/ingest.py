@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from homefinance.db import _upsert
 from homefinance.db.store import Store
@@ -325,3 +325,90 @@ def ingest_file(
         file_path_archive=archive_path_str,
         first_transactions=first_n,
     )
+
+
+# ---------------------------------------------------------------------------
+# Batch lifecycle: confirm / reject / list
+
+
+def confirm_batch(store: Store, batch_id: int) -> dict[str, Any]:
+    """Flip a pending batch's transactions to ``status='confirmed'`` atomically."""
+    row = store.execute(
+        "SELECT review_status FROM statement_batches WHERE id = ?",
+        (batch_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"batch {batch_id} not found")
+    if row["review_status"] != "pending":
+        raise ValueError(
+            f"batch {batch_id} is not pending (status: {row['review_status']!r})"
+        )
+
+    now = _utcnow()
+    with store.transaction():
+        store.execute(
+            "UPDATE transactions SET status = 'confirmed' "
+            "WHERE batch_id = ? AND status = 'pending_review'",
+            (batch_id,),
+        )
+        store.execute(
+            "UPDATE statement_batches "
+            "SET review_status = 'confirmed', review_resolved_at = ? "
+            "WHERE id = ?",
+            (now, batch_id),
+        )
+    return {"batch_id": batch_id, "review_status": "confirmed", "review_resolved_at": now}
+
+
+def reject_batch(store: Store, batch_id: int) -> dict[str, Any]:
+    """Delete a pending batch's staged transactions; keep batch row for audit."""
+    row = store.execute(
+        "SELECT review_status FROM statement_batches WHERE id = ?",
+        (batch_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"batch {batch_id} not found")
+    if row["review_status"] != "pending":
+        raise ValueError(
+            f"batch {batch_id} is not pending (status: {row['review_status']!r})"
+        )
+
+    now = _utcnow()
+    with store.transaction():
+        store.execute("DELETE FROM transactions WHERE batch_id = ?", (batch_id,))
+        store.execute(
+            "UPDATE statement_batches "
+            "SET review_status = 'rejected', review_resolved_at = ? "
+            "WHERE id = ?",
+            (now, batch_id),
+        )
+    return {"batch_id": batch_id, "review_status": "rejected", "review_resolved_at": now}
+
+
+def list_batches(
+    store: Store,
+    *,
+    source_id: str | None = None,
+    review_status: str | None = "pending",
+) -> list[dict[str, Any]]:
+    """List batches matching the filters (most-recent first)."""
+    where: list[str] = []
+    params: list[Any] = []
+    if source_id is not None:
+        where.append("source_id = ?")
+        params.append(source_id)
+    if review_status is not None:
+        where.append("review_status = ?")
+        params.append(review_status)
+    sql = (
+        "SELECT id, source_id, parser, txn_count, review_status, "
+        "reconciliation_status, drift_minor, parsed_at, file_path_original "
+        "FROM statement_batches "
+    )
+    if where:
+        sql += "WHERE " + " AND ".join(where) + " "
+    sql += "ORDER BY id DESC"
+    return [
+        {k: r[k] for k in r.keys()}  # noqa: SIM118 — sqlite3.Row needs .keys()
+        for r in store.execute(sql, params).fetchall()
+    ]

@@ -8,9 +8,12 @@ from homefinance.sources.statement.ingest import (
     AccountAlreadyRegistered,
     BatchPreview,
     compute_file_hash,
+    confirm_batch,
     ingest_file,
+    list_batches,
     reconcile,
     register_account,
+    reject_batch,
     resolve_account,
     row_external_id,
 )
@@ -229,3 +232,73 @@ def test_ingest_file_reconciles_when_balances_present(store: Store, tmp_path: Pa
     # drift = -8567 - (-134560) = 125993.
     assert preview.reconciliation_status == "drift"
     assert preview.drift_minor == 125993
+
+
+def _seed_batch(store: Store, tmp_path: Path) -> int:
+    """Helper: register an account and stage a pending CSV batch."""
+    register_account(store, nickname="citi-cc", type="credit_card", currency="USD")
+    config_dir = tmp_path / "homefinance"
+    _write_template(config_dir, "statement:citi-cc", _CSV_CITI_TEMPLATE)
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    preview = ingest_file(
+        store,
+        path=fixture,
+        account_nickname="citi-cc",
+        config_dir=config_dir,
+        archive_dir=tmp_path / "archive",
+    )
+    return preview.batch_id
+
+
+def test_confirm_batch_flips_status(store: Store, tmp_path: Path) -> None:
+    batch_id = _seed_batch(store, tmp_path)
+    result = confirm_batch(store, batch_id)
+    assert result["batch_id"] == batch_id
+    assert result["review_status"] == "confirmed"
+
+    statuses = {
+        r["status"]
+        for r in store.execute(
+            "SELECT status FROM transactions WHERE batch_id = ?", (batch_id,)
+        ).fetchall()
+    }
+    assert statuses == {"confirmed"}
+
+
+def test_reject_batch_deletes_transactions(store: Store, tmp_path: Path) -> None:
+    batch_id = _seed_batch(store, tmp_path)
+    result = reject_batch(store, batch_id)
+    assert result["review_status"] == "rejected"
+
+    n = store.execute(
+        "SELECT COUNT(*) AS n FROM transactions WHERE batch_id = ?", (batch_id,)
+    ).fetchone()["n"]
+    assert n == 0
+    # statement_batches row preserved
+    row = store.execute(
+        "SELECT review_status FROM statement_batches WHERE id = ?", (batch_id,)
+    ).fetchone()
+    assert row["review_status"] == "rejected"
+
+
+def test_confirm_after_reject_returns_error(store: Store, tmp_path: Path) -> None:
+    batch_id = _seed_batch(store, tmp_path)
+    reject_batch(store, batch_id)
+    with pytest.raises(ValueError, match="not pending"):
+        confirm_batch(store, batch_id)
+
+
+def test_list_batches_filters_by_status(store: Store, tmp_path: Path) -> None:
+    batch_id = _seed_batch(store, tmp_path)
+    pending = list_batches(store, review_status="pending")
+    assert len(pending) == 1
+    assert pending[0]["id"] == batch_id
+
+    confirmed = list_batches(store, review_status="confirmed")
+    assert confirmed == []
+
+    confirm_batch(store, batch_id)
+    pending = list_batches(store, review_status="pending")
+    confirmed = list_batches(store, review_status="confirmed")
+    assert pending == []
+    assert len(confirmed) == 1
