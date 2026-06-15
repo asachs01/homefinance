@@ -53,3 +53,57 @@ def contribution_deadline(tax_year: int) -> str:
 def _round_up_to_nearest_10_dollars(amount_minor: float) -> int:
     """Round a cents amount up to the nearest $10 (1000 cents) — IRS worksheet rule."""
     return math.ceil(amount_minor / 1000) * 1000
+
+
+def _phaseout_band_key(filing_status: str) -> str:
+    """Map filing status to its Roth phase-out band key.
+
+    'head_of_household' shares the 'single' band per IRS rules.
+    """
+    if filing_status in ("single", "head_of_household"):
+        return "single"
+    return filing_status
+
+
+def roth_eligibility(
+    *,
+    filing_status: str,
+    magi_minor: int,
+    age: int,
+    limits: dict[str, Any],
+) -> dict[str, Any]:
+    """Reduced Roth contribution sub-limit given MAGI + filing status.
+
+    Below the band → full IRA limit; at/above the high end → $0; within the
+    band → IRS worksheet: limit * (1 - (magi-low)/(high-low)), rounded UP to
+    the nearest $10, with any positive result floored to $200.
+    """
+    full_limit, _ = _ira_limit_with_catchup(age, limits)
+    band = limits["roth_phaseout"][_phaseout_band_key(filing_status)]
+    low, high = band["low_minor"], band["high_minor"]
+
+    if magi_minor < low:
+        return {
+            "status": "full",
+            "roth_limit_minor": full_limit,
+            "band_low_minor": low,
+            "band_high_minor": high,
+        }
+    if magi_minor >= high:
+        return {
+            "status": "none",
+            "roth_limit_minor": 0,
+            "band_low_minor": low,
+            "band_high_minor": high,
+        }
+
+    frac = (magi_minor - low) / (high - low)
+    reduced = _round_up_to_nearest_10_dollars(full_limit * (1.0 - frac))
+    if 0 < reduced < 20000:  # IRS $200 floor
+        reduced = 20000
+    return {
+        "status": "partial",
+        "roth_limit_minor": int(reduced),
+        "band_low_minor": low,
+        "band_high_minor": high,
+    }
