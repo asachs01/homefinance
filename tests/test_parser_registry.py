@@ -10,7 +10,9 @@ from homefinance.sources.statement.parsers import (
 from homefinance.sources.statement.parsers.base import NoSuitableParser
 
 
-def test_find_parser_raises_when_registry_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_find_parser_raises_when_registry_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(
         "homefinance.sources.statement.parsers._REGISTRY",
         [],
@@ -21,7 +23,9 @@ def test_find_parser_raises_when_registry_empty(tmp_path: Path, monkeypatch: pyt
         find_parser(p)
 
 
-def test_find_parser_dispatches_by_extension(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_find_parser_dispatches_by_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Stand up a stub parser module on the fly.
     stub = type(sys)("_test_stub_parser")
 
@@ -49,7 +53,8 @@ def test_find_parser_dispatches_by_extension(tmp_path: Path, monkeypatch: pytest
     assert parser_cls is StubParser
 
 
-def test_registry_starts_empty_until_parsers_register() -> None:
-    # The base module ships an empty registry; subsequent parser tasks
-    # append to it. Until Task 7 (CSV) lands, _REGISTRY is empty.
-    assert _REGISTRY == []
+def test_registry_contains_csv_after_csv_module_imported() -> None:
+    # Once Task 7's CSV parser module is imported, it registers itself.
+    import homefinance.sources.statement.parsers.csv  # noqa: F401
+
+    assert (".csv", "homefinance.sources.statement.parsers.csv:CSVParser") in _REGISTRY
