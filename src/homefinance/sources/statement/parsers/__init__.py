@@ -51,3 +51,13 @@ def find_parser(path: Path) -> type[StatementParser]:
         f"no parser knows {str(path)!r} (saw extension {ext!r}). "
         "Supported: csv, ofx, qfx, pdf."
     )
+
+
+# Side-effect imports: each parser module self-registers at import time. Done
+# here (not in callers) so any consumer of ``find_parser`` sees the full set
+# without remembering to import the modules. The heavy optional deps
+# (``docling``, ``ofxtools``) are still lazy-imported inside the concrete
+# parsers, so loading these registration modules is cheap.
+from homefinance.sources.statement.parsers import csv as _csv  # noqa: E402, F401
+from homefinance.sources.statement.parsers import docling_pdf as _docling  # noqa: E402, F401
+from homefinance.sources.statement.parsers import ofx as _ofx  # noqa: E402, F401

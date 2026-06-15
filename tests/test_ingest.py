@@ -108,22 +108,29 @@ def test_reconcile_na_when_balance_missing() -> None:
     assert drift is None
 
 
+_CSV_CITI_TEMPLATE = (
+    'parser = "csv"\n'
+    "[columns]\n"
+    'date = "Transaction Date"\n'
+    'amount = "Amount"\n'
+    'payee = "Description"\n'
+    'memo = "Notes"\n'
+    "[options]\n"
+    'date_format = "%m/%d/%Y"\n'
+    'sign = "natural"\n'
+)
+
+
+def _write_template(config_dir: Path, source_id: str, body: str) -> None:
+    templates = config_dir / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / f"{source_id}.toml").write_text(body)
+
+
 def test_ingest_file_csv_stages_pending_batch(store: Store, tmp_path: Path) -> None:
     register_account(store, nickname="citi-cc", type="credit_card", currency="USD")
-    # Write template to a tmp config dir.
     config_dir = tmp_path / "homefinance"
-    (config_dir / "templates").mkdir(parents=True)
-    (config_dir / "templates" / "statement:citi-cc.toml").write_text(
-        'parser = "csv"\n'
-        "[columns]\n"
-        'date = "Transaction Date"\n'
-        'amount = "Amount"\n'
-        'payee = "Description"\n'
-        'memo = "Notes"\n'
-        "[options]\n"
-        'date_format = "%m/%d/%Y"\n'
-        'sign = "natural"\n'
-    )
+    _write_template(config_dir, "statement:citi-cc", _CSV_CITI_TEMPLATE)
 
     fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
     archive_dir = tmp_path / "archive"
@@ -163,14 +170,7 @@ def test_ingest_file_csv_stages_pending_batch(store: Store, tmp_path: Path) -> N
 def test_ingest_file_blocks_re_ingest_of_same_file(store: Store, tmp_path: Path) -> None:
     register_account(store, nickname="citi-cc", type="credit_card", currency="USD")
     config_dir = tmp_path / "homefinance"
-    (config_dir / "templates").mkdir(parents=True)
-    (config_dir / "templates" / "statement:citi-cc.toml").write_text(
-        'parser = "csv"\n'
-        "[columns]\n"
-        'date = "Transaction Date"\namount = "Amount"\npayee = "Description"\nmemo = "Notes"\n'
-        "[options]\n"
-        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
-    )
+    _write_template(config_dir, "statement:citi-cc", _CSV_CITI_TEMPLATE)
     fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
     archive_dir = tmp_path / "archive"
 
@@ -200,11 +200,12 @@ def test_ingest_file_reconciles_when_balances_present(store: Store, tmp_path: Pa
 
     register_account(store, nickname="wells", type="checking", currency="USD")
     config_dir = tmp_path / "homefinance"
-    (config_dir / "templates").mkdir(parents=True)
-    (config_dir / "templates" / "statement:wells.toml").write_text(
+    _write_template(
+        config_dir,
+        "statement:wells",
         'parser = "docling_pdf"\n'
         "[columns]\ndate = 0\npayee = 1\namount = 2\n"
-        '[options]\ndate_format = "%m/%d/%Y"\nsign = "natural"\n'
+        '[options]\ndate_format = "%m/%d/%Y"\nsign = "natural"\n',
     )
     cells = Path(__file__).resolve().parent / "fixtures" / "docling" / "tiny-pdf" / "cells.json"
 

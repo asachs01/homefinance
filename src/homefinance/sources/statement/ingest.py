@@ -9,6 +9,7 @@ This module is built up across Tasks 10-12 of the SP2 plan:
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,14 +19,7 @@ from homefinance.db import _upsert
 from homefinance.db.store import Store
 from homefinance.sources.base import RemoteTransaction
 from homefinance.sources.statement.archive import archive_file
-
-# Side-effect imports: each parser module self-registers at import time. The
-# heavy optional deps (``docling``, ``ofxtools``) are still lazy-imported
-# inside the concrete parsers, so loading these modules is cheap.
-from homefinance.sources.statement.parsers import csv as _csv_parser  # noqa: F401
-from homefinance.sources.statement.parsers import docling_pdf as _docling_parser  # noqa: F401
 from homefinance.sources.statement.parsers import find_parser
-from homefinance.sources.statement.parsers import ofx as _ofx_parser  # noqa: F401
 from homefinance.sources.statement.parsers.base import (
     AccountNotConfigured,
     FileAlreadyIngested,
@@ -221,58 +215,62 @@ def ingest_file(
     account = resolve_account(store, account_nickname)
     file_hash = compute_file_hash(path)
 
-    # File-level dedup
+    # File-level dedup — fetch prior batch (if any) and act on it.
     prior = store.execute(
         "SELECT id, review_status FROM statement_batches "
         "WHERE file_hash = ? AND source_id = ?",
         (file_hash, account.source_id),
     ).fetchone()
-    if prior:
-        if prior["review_status"] in ("pending", "confirmed") and not allow_reingest:
-            raise FileAlreadyIngested(
-                f"already ingested as batch #{prior['id']} "
-                f"(status: {prior['review_status']}). Use --reingest to re-process."
-            )
-        if allow_reingest:
-            store.execute(
-                "DELETE FROM statement_batches WHERE id = ?", (prior["id"],)
-            )
+    if prior and not allow_reingest and prior["review_status"] in ("pending", "confirmed"):
+        raise FileAlreadyIngested(
+            f"already ingested as batch #{prior['id']} "
+            f"(status: {prior['review_status']}). Use --reingest to re-process."
+        )
+    if prior and allow_reingest:
+        # UNIQUE(file_hash, source_id) would block re-inserting; drop the row.
+        store.execute("DELETE FROM statement_batches WHERE id = ?", (prior["id"],))
 
     parser_cls = find_parser(path)
     template = load_template(account.source_id, config_dir=config_dir)
     parsed = parser_cls.parse(path, account, template)
 
-    # Build synthetic external IDs, suffixing within-batch collisions
-    seen: dict[str, int] = {}
-    txns_with_ids: list[tuple[str, RemoteTransaction]] = []
+    # Build stamped transactions in one pass: assign collision-suffixed
+    # external IDs and accumulate the signed total used for reconciliation.
+    seen: Counter[str] = Counter()
+    stamped: list[RemoteTransaction] = []
+    txn_total = 0
     for txn in parsed.transactions:
         base = row_external_id(
             account.account_id, txn.date, txn.amount_minor, txn.payee, txn.memo
         )
-        n = seen.get(base, 0)
+        n = seen[base]
         external_id = base if n == 0 else f"{base}:{n}"
-        seen[base] = n + 1
-        txns_with_ids.append((external_id, txn))
+        seen[base] += 1
+        stamped.append(
+            replace(txn, external_id=external_id, account_external_id="account")
+        )
+        txn_total += txn.amount_minor
 
-    # Reconcile
-    txn_total = sum(t.amount_minor for _, t in txns_with_ids)
     recon_status, drift_minor = reconcile(
         opening=parsed.opening_balance_minor,
         closing=parsed.closing_balance_minor,
         txn_total=txn_total,
     )
 
-    # Archive — abort before any DB write if it fails
-    archive_path: Path | None = None
-    if archive:
-        archive_path = archive_file(
+    # Archive — abort before any DB write if it fails.
+    archive_path: Path | None = (
+        archive_file(
             path,
             source_id=account.source_id,
             file_hash=file_hash,
             archive_dir=archive_dir,
         )
+        if archive
+        else None
+    )
+    archive_path_str = str(archive_path) if archive_path else None
 
-    # Atomic stage
+    # Atomic stage.
     parsed_at = _utcnow()
     with store.transaction():
         cur = store.execute(
@@ -285,35 +283,26 @@ def ingest_file(
                 account.source_id,
                 file_hash,
                 str(path),
-                str(archive_path) if archive_path else None,
+                archive_path_str,
                 parsed.source_format,
                 parsed.statement_period_start,
                 parsed.statement_period_end,
                 parsed.opening_balance_minor,
                 parsed.closing_balance_minor,
                 parsed_at,
-                len(txns_with_ids),
+                len(stamped),
                 recon_status,
                 drift_minor,
             ),
         )
         batch_id = cast(int, cur.lastrowid)
 
-        # CRITICAL: pre-seed the counters dict that _upsert.upsert_transaction
-        # mutates via `counters[name] += 1`. The keys MUST exist or we KeyError.
-        counters: dict[str, int] = {
-            "inserted": 0,
-            "updated": 0,
-            "deleted": 0,
-            "accounts_touched": 0,
-        }
-        # Stage each transaction as pending_review with batch_id linking back.
-        for external_id, txn in txns_with_ids:
-            stamped = replace(txn, external_id=external_id, account_external_id="account")
+        counters = _upsert.new_counters()
+        for txn in stamped:
             _upsert.upsert_transaction(
                 store,
                 account.source_id,
-                stamped,
+                txn,
                 counters,
                 status="pending_review",
                 batch_id=batch_id,
@@ -321,18 +310,18 @@ def ingest_file(
 
     first_n = tuple(
         TxnPreview(date=t.date, amount_minor=t.amount_minor, payee=t.payee, memo=t.memo)
-        for _, t in txns_with_ids[:preview_sample_size]
+        for t in stamped[:preview_sample_size]
     )
     return BatchPreview(
         batch_id=batch_id,
         source_id=account.source_id,
-        txn_count=len(txns_with_ids),
+        txn_count=len(stamped),
         reconciliation_status=recon_status,
         drift_minor=drift_minor,
         statement_period_start=parsed.statement_period_start,
         statement_period_end=parsed.statement_period_end,
         opening_balance_minor=parsed.opening_balance_minor,
         closing_balance_minor=parsed.closing_balance_minor,
-        file_path_archive=str(archive_path) if archive_path else None,
+        file_path_archive=archive_path_str,
         first_transactions=first_n,
     )

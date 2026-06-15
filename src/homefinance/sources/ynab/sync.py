@@ -41,12 +41,7 @@ def run_sync(source: AccountSource, store: Store) -> SyncRunResult:
 
     delta = source.pull(cursor)
 
-    counters: dict[str, int] = {
-        "inserted": 0,
-        "updated": 0,
-        "deleted": 0,
-        "accounts_touched": 0,
-    }
+    counters = _upsert.new_counters()
 
     with store.transaction():
         store.execute(

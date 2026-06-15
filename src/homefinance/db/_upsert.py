@@ -25,6 +25,17 @@ def utcnow() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def new_counters() -> dict[str, int]:
+    """Pre-seeded counter dict for the upsert helpers below.
+
+    ``upsert_transaction`` / ``upsert_account`` / ``insert_subtransaction`` all
+    do ``counters[name] += 1`` (not ``counters.get(name, 0) + 1``), so callers
+    must seed the four keys or get a ``KeyError``. Use this factory at every
+    call site so adding a fifth counter is a one-place change.
+    """
+    return {"inserted": 0, "updated": 0, "deleted": 0, "accounts_touched": 0}
+
+
 def upsert_account(
     store: Store, source_id: str, a: RemoteAccount, counters: dict[str, int]
 ) -> None:
