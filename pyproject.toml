@@ -74,8 +74,11 @@ module = ["yoyo.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config --ignore=tests/integration"
 testpaths = ["tests"]
+markers = [
+    "docling: live Docling tests; only run with `pytest tests/integration -m docling`",
+]
 filterwarnings = [
     "error",
     # yoyo-migrations relies on sqlite3's default datetime adapter, which
