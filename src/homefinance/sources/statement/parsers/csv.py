@@ -22,7 +22,7 @@ class CSVParser:
 
     @classmethod
     def claims(cls, path: Path) -> bool:
-        return Path(path).suffix.lower() == ".csv"
+        return path.suffix.lower() == ".csv"
 
     @classmethod
     def parse(
@@ -48,14 +48,18 @@ class CSVParser:
 
         payee_col = cols.get("payee")
         memo_col = cols.get("memo")
+        sign_mul = -1 if sign == "invert" else 1
+
+        def _opt(row: dict[str, str], col: str | None) -> str | None:
+            return (row.get(col, "").strip() or None) if col else None
 
         transactions: list[RemoteTransaction] = []
-        with Path(path).open(newline="", encoding="utf-8-sig") as f:
+        with path.open(newline="", encoding="utf-8-sig") as f:
             reader = _csv.DictReader(f)
-            if reader.fieldnames is None or date_col not in reader.fieldnames:
-                raise ParseError(f"column {date_col!r} not found in CSV header")
-            if amount_col not in reader.fieldnames:
-                raise ParseError(f"column {amount_col!r} not found in CSV header")
+            fieldnames = reader.fieldnames or ()
+            for required in (date_col, amount_col):
+                if required not in fieldnames:
+                    raise ParseError(f"column {required!r} not found in CSV header")
             for i, row in enumerate(reader):
                 try:
                     canonical_date = datetime.strptime(row[date_col], date_fmt).date().isoformat()
@@ -65,13 +69,11 @@ class CSVParser:
                 if not amount_str:
                     raise ParseError(f"row {i + 2}: empty amount")
                 try:
-                    amount_minor = round(float(amount_str) * 100)
+                    amount_minor = round(float(amount_str) * 100) * sign_mul
                 except ValueError as e:
                     raise ParseError(f"row {i + 2}: bad amount {amount_str!r}: {e}") from e
-                if sign == "invert":
-                    amount_minor = -amount_minor
-                payee = (row.get(payee_col, "").strip() or None) if payee_col else None
-                memo = (row.get(memo_col, "").strip() or None) if memo_col else None
+                payee = _opt(row, payee_col)
+                memo = _opt(row, memo_col)
                 transactions.append(
                     RemoteTransaction(
                         external_id="",
@@ -103,6 +105,4 @@ class CSVParser:
         )
 
 
-# Register on import. The orchestrator imports this module lazily via the
-# registry, so this side effect only fires when CSV is actually needed.
 register(".csv", "homefinance.sources.statement.parsers.csv:CSVParser")
