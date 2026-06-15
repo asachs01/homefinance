@@ -431,3 +431,22 @@ def test_mcp_retirement_summary_no_config_returns_friendly_message() -> None:
 
     out = mcp_retirement_summary(tax_year=2025, retirement_cfg=None)
     assert "configure" in out["message"].lower()
+
+
+def test_mcp_roth_eligibility_invalid_filing_status_returns_error() -> None:
+    from homefinance.mcp_server.tools import roth_eligibility as mcp_roth_eligibility
+
+    out = mcp_roth_eligibility(tax_year=2025, filing_status="married", magi_minor=15000000, age=40)
+    assert out["error"] == "invalid_filing_status"
+    assert "filing_status" in out["message"]
+
+
+def test_mcp_retirement_summary_malformed_config_returns_error() -> None:
+    from homefinance.mcp_server.tools import retirement_summary as mcp_retirement_summary
+
+    # Unknown key in [retirement] (extra="forbid") must surface a structured
+    # error dict, not propagate a raw pydantic.ValidationError.
+    out = mcp_retirement_summary(
+        tax_year=2025, retirement_cfg={"birth_year": 1985, "fyling_status": "single"}
+    )
+    assert out["error"] == "invalid_config"

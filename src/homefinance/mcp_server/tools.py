@@ -7,7 +7,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
+
+from pydantic import ValidationError
 
 from homefinance.analysis.anomaly import detect_anomalies as _detect_anomalies_lib
 from homefinance.analysis.cashflow import cash_flow as _cash_flow_lib
@@ -25,6 +27,7 @@ from homefinance.retirement.compute import hsa_headroom as _hsa_headroom
 from homefinance.retirement.compute import ira_headroom as _ira_headroom
 from homefinance.retirement.compute import opportunities as _opportunities
 from homefinance.retirement.compute import roth_eligibility as _roth_eligibility
+from homefinance.retirement.inputs import FilingStatus as _FilingStatus
 from homefinance.retirement.inputs import parse_retirement as _parse_retirement
 from homefinance.retirement.limits import LimitsNotFound as _LimitsNotFound
 from homefinance.retirement.limits import load_limits as _load_limits
@@ -487,6 +490,8 @@ def detect_anomalies(
 # ---------------------------------------------------------------------------
 # Retirement
 
+_VALID_FILING_STATUSES = frozenset(get_args(_FilingStatus))
+
 
 def contribution_limits(*, tax_year: int) -> dict[str, Any]:
     """Raw IRS limits for a tax year (with source + disclaimer), or an error dict."""
@@ -513,6 +518,11 @@ def roth_eligibility(
     *, tax_year: int, filing_status: str, magi_minor: int, age: int = 40
 ) -> dict[str, Any]:
     """Roth phase-out status + reduced limit for a tax year, or an error dict."""
+    if filing_status not in _VALID_FILING_STATUSES:
+        return {
+            "error": "invalid_filing_status",
+            "message": f"filing_status must be one of {sorted(_VALID_FILING_STATUSES)}",
+        }
     try:
         lim = _load_limits(tax_year)
     except _LimitsNotFound as e:
@@ -534,7 +544,10 @@ def retirement_summary(
     ``retirement_cfg`` is the raw ``[retirement]`` config dict (or None). The
     MCP wrapper loads it from config; tests pass it directly.
     """
-    cfg = _parse_retirement(retirement_cfg)
+    try:
+        cfg = _parse_retirement(retirement_cfg)
+    except ValidationError as e:
+        return {"error": "invalid_config", "message": str(e)}
     if cfg is None:
         return {
             "message": "No retirement profile configured. Add a [retirement] section "

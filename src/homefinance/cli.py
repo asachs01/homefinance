@@ -629,7 +629,7 @@ def retirement_summary_cmd(
         tax_year=tax_year, retirement_cfg=raw, magi_override_minor=magi_override
     )
 
-    if out.get("error") == "no_limit_data":
+    if out.get("error"):
         err_console.print(f"[red]{out['message']}[/]")
         raise typer.Exit(code=1)
     if "message" in out and "ira" not in out:

@@ -498,3 +498,20 @@ def test_retirement_summary_unknown_year_errors(
     )
     result = runner.invoke(app, ["retirement", "summary", "--tax-year", "1999"])
     assert result.exit_code != 0
+
+
+def test_retirement_summary_malformed_config_errors(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    # An unknown key in [retirement] (extra="forbid") must exit non-zero with a
+    # message, not crash with a raw pydantic traceback.
+    cfg_path = env / "config.toml"
+    cfg_path.write_text(
+        cfg_path.read_text() + '\n[retirement]\nbirth_year = 1985\nfyling_status = "single"\n'
+    )
+    result = runner.invoke(app, ["retirement", "summary", "--tax-year", "2025"])
+    assert result.exit_code != 0
