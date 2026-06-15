@@ -7,9 +7,11 @@ Open-source, local-first home financial analysis — distributed as a Claude Cod
 ## What it does
 
 - Syncs **YNAB** (read-only) into a local SQLite store.
-- Exposes 8 read tools over the store via a stdio MCP server.
+- Ingests **statement files** (CSV / OFX / QFX / PDF via Docling) into the same canonical store, with a two-phase confirm/reject lifecycle so the parser's output is never trusted without human review.
+- 12 read tools (8 from SP1 plus `ingest_statement`, `list_batches`, `confirm_batch`, `reject_batch`).
+- Ships a third skill (`homefinance-import-statement`) for guided statement imports.
 - Ships two Claude Code skills (`homefinance-setup`, `homefinance-explore`) for guided setup and analysis.
-- Designed so statement ingestion (SP2), spending analytics (SP3), and retirement optimization (SP4) plug in without schema changes.
+- Designed so spending analytics (SP3) and retirement optimization (SP4) plug in without schema changes.
 
 ## Quickstart
 
@@ -19,7 +21,12 @@ git clone https://github.com/asachs01/homefinance.git
 cd homefinance
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+```
 
+**Lean install** (`pip install -e .`) supports YNAB sync only.
+**Full install** (`pip install -e ".[ingest]"`) adds the Docling PDF + OFX/QFX parsers (~500MB of PyTorch + models on first use).
+
+```bash
 # 2. Get a YNAB Personal Access Token from
 #    https://app.ynab.com/settings/developer → "New Token"
 export HOMEFINANCE_YNAB_TOKEN=<your-token>

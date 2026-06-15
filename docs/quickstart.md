@@ -57,6 +57,20 @@ Try:
 
 Claude will call `list_sources` then `list_accounts` and render a small balance table.
 
+## Importing a statement
+
+For accounts YNAB doesn't cover (or for one-off PDF statements), register the account once and then ingest files.
+
+```bash
+homefinance accounts add --nickname citi-cc --type credit_card --currency USD
+# (For CSV or PDF parsers, also author ~/.homefinance/templates/statement:citi-cc.toml.)
+homefinance ingest ~/Downloads/citi-2026-06.pdf --account citi-cc
+```
+
+The CLI parses, reconciles balance against the statement's closing total, and shows a preview. Pressing `y` confirms; anything else rejects (deletes the staged rows; keeps the batch row for audit).
+
+For a fully scripted flow, pass `--no-prompt`, then later run `homefinance batch confirm <id>` when you're ready.
+
 ## Day-to-day
 
 - `homefinance sync` — re-sync from YNAB (cron-able)
