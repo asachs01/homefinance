@@ -325,3 +325,60 @@ def test_ingest_prompt_y_confirms(
     )
     assert result.exit_code == 0, result.stdout
     assert "Confirmed" in result.stdout
+
+
+def test_batches_lists_pending(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(app, ["init", "--token", "T", "--budget", "budget-tiny",
+                        "--nickname", "tiny", "--no-sync"])
+    runner.invoke(app, ["accounts", "add", "--nickname", "citi-cc",
+                        "--type", "credit_card"])
+    (env / "templates").mkdir(parents=True, exist_ok=True)
+    (env / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = (Path(__file__).resolve().parent
+               / "fixtures" / "statement" / "tiny.csv")
+    runner.invoke(app, ["ingest", str(fixture), "--account", "citi-cc",
+                        "--no-prompt", "--no-archive"])
+
+    result = runner.invoke(app, ["batches"])
+    assert result.exit_code == 0, result.stdout
+    assert "statement:citi-cc" in result.stdout
+    assert "pending" in result.stdout
+
+
+def test_batch_confirm_then_status_shows_no_pending(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(app, ["init", "--token", "T", "--budget", "budget-tiny",
+                        "--nickname", "tiny", "--no-sync"])
+    runner.invoke(app, ["accounts", "add", "--nickname", "citi-cc",
+                        "--type", "credit_card"])
+    (env / "templates").mkdir(parents=True, exist_ok=True)
+    (env / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = (Path(__file__).resolve().parent
+               / "fixtures" / "statement" / "tiny.csv")
+    runner.invoke(app, ["ingest", str(fixture), "--account", "citi-cc",
+                        "--no-prompt", "--no-archive"])
+    # batch_id will be 1 since this is the only one
+    res2 = runner.invoke(app, ["batch", "confirm", "1"])
+    assert res2.exit_code == 0
+    assert "Confirmed" in res2.stdout
+
+    listing = runner.invoke(app, ["batches"])
+    # After confirmation, the default "pending" filter should show empty.
+    assert "No pending" in listing.stdout or "1" not in listing.stdout

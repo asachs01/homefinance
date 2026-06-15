@@ -29,6 +29,9 @@ from homefinance.sources.statement.ingest import (
     ingest_file as _ingest_file,
 )
 from homefinance.sources.statement.ingest import (
+    list_batches as _list_batches,
+)
+from homefinance.sources.statement.ingest import (
     register_account as _register_statement_account,
 )
 from homefinance.sources.statement.ingest import (
@@ -115,7 +118,9 @@ def status() -> None:
         "SELECT s.id AS source_id, s.kind, s.nickname, "
         "ss.last_sync_at, ss.server_knowledge, "
         "(SELECT reconciliation FROM sync_runs WHERE source_id = s.id "
-        " ORDER BY id DESC LIMIT 1) AS last_recon "
+        " ORDER BY id DESC LIMIT 1) AS last_recon, "
+        "(SELECT COUNT(*) FROM statement_batches "
+        " WHERE source_id = s.id AND review_status = 'pending') AS pending_batches "
         "FROM sources s "
         "LEFT JOIN sync_state ss ON ss.source_id = s.id "
         "ORDER BY s.id"
@@ -131,6 +136,7 @@ def status() -> None:
     table.add_column("last sync")
     table.add_column("cursor", justify="right")
     table.add_column("reconciliation")
+    table.add_column("pending", justify="right")
     for r in rows:
         table.add_row(
             r["source_id"],
@@ -138,6 +144,7 @@ def status() -> None:
             r["last_sync_at"] or "(never)",
             str(r["server_knowledge"] or "-"),
             r["last_recon"] or "-",
+            str(r["pending_batches"] or "-"),
         )
     console.print(table)
 
@@ -423,3 +430,86 @@ def ingest(
     else:
         _reject_batch(store, preview.batch_id)
         console.print(f"[yellow]Rejected[/] batch #{preview.batch_id}.")
+
+
+@app.command()
+def batches(
+    pending: bool = typer.Option(True, "--pending"),
+    confirmed: bool = typer.Option(False, "--confirmed"),
+    rejected: bool = typer.Option(False, "--rejected"),
+    all_: bool = typer.Option(False, "--all"),
+    source: str | None = typer.Option(None, "--source"),
+) -> None:
+    """List statement batches in the local store."""
+    del pending  # default-on flag; selection logic below honors the others first
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        console.print("[yellow]No database. Nothing to list.[/]")
+        return
+    store = Store.open(cfg.db_path)
+
+    if all_:
+        status = None
+    elif rejected:
+        status = "rejected"
+    elif confirmed:
+        status = "confirmed"
+    else:
+        status = "pending"
+
+    rows = _list_batches(store, source_id=source, review_status=status)
+    if not rows:
+        label = "any" if status is None else status
+        console.print(f"[yellow]No {label} batches.[/]")
+        return
+
+    table = Table(title=f"Statement Batches ({status or 'all'})")
+    table.add_column("batch_id", justify="right")
+    table.add_column("source", no_wrap=True)
+    table.add_column("parsed_at", no_wrap=True)
+    table.add_column("count", justify="right")
+    table.add_column("reconciliation")
+    table.add_column("status")
+    for r in rows:
+        recon = r["reconciliation_status"]
+        if r["drift_minor"]:
+            recon += f" ({r['drift_minor'] / 100:+.2f})"
+        table.add_row(
+            str(r["id"]),
+            r["source_id"],
+            r["parsed_at"],
+            str(r["txn_count"]),
+            recon,
+            r["review_status"],
+        )
+    console.print(table)
+
+
+batch_app = typer.Typer(help="Per-batch operations.")
+app.add_typer(batch_app, name="batch")
+
+
+@batch_app.command("confirm")
+def batch_confirm_cmd(batch_id: int) -> None:
+    """Confirm a pending batch."""
+    cfg = load_config()
+    store = Store.open(cfg.db_path)
+    try:
+        _confirm_batch(store, batch_id)
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[green]Confirmed[/] batch #{batch_id}.")
+
+
+@batch_app.command("reject")
+def batch_reject_cmd(batch_id: int) -> None:
+    """Reject a pending batch (deletes its staged transactions)."""
+    cfg = load_config()
+    store = Store.open(cfg.db_path)
+    try:
+        _reject_batch(store, batch_id)
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[yellow]Rejected[/] batch #{batch_id}.")
