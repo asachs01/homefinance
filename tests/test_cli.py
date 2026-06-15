@@ -391,3 +391,56 @@ def test_batch_confirm_then_status_shows_no_pending(
     listing = runner.invoke(app, ["batches"])
     # After confirmation, the default "pending" filter should show empty.
     assert "No pending" in listing.stdout or "1" not in listing.stdout
+
+
+def test_categorize_rules_add_and_list(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    add = runner.invoke(
+        app,
+        [
+            "categorize",
+            "rules",
+            "add",
+            "--field",
+            "payee",
+            "--pattern",
+            "Shell",
+            "--category",
+            "Gas",
+        ],
+    )
+    assert add.exit_code == 0, add.stdout
+    assert "Added rule" in add.stdout
+    listing = runner.invoke(app, ["categorize", "rules", "list"])
+    assert listing.exit_code == 0
+    assert "Shell" in listing.stdout
+    assert "Gas" in listing.stdout
+
+
+def test_categorize_apply_runs(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny"]
+    )  # sync so YNAB rows exist
+    monkeypatch.setenv("HOMEFINANCE_YNAB_TOKEN", "T")
+    result = runner.invoke(app, ["categorize", "apply"])
+    assert result.exit_code == 0, result.stdout
+    assert "ynab" in result.stdout.lower() or "categoriz" in result.stdout.lower()
+
+
+def test_categorize_rules_add_invalid_field_errors(env: Path) -> None:
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    result = runner.invoke(
+        app,
+        ["categorize", "rules", "add", "--field", "banana", "--pattern", "x", "--category", "Y"],
+    )
+    assert result.exit_code != 0
