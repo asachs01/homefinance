@@ -219,3 +219,175 @@ def test_ynab_remove_unknown_budget_errors(
     result = runner.invoke(app, ["ynab", "remove-budget", "--budget-id", "nope"])
     assert result.exit_code != 0
     assert "not found" in result.stdout.lower() or "not found" in (result.stderr or "").lower()
+
+
+def test_accounts_add_creates_source_row(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "accounts",
+            "add",
+            "--nickname",
+            "citi-cc",
+            "--type",
+            "credit_card",
+            "--currency",
+            "USD",
+            "--display-name",
+            "Citi Credit Card",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Added" in result.stdout
+    assert "statement:citi-cc" in result.stdout
+
+    import sqlite3
+
+    with sqlite3.connect(env / "db.sqlite3") as conn:
+        srcs = {r[0] for r in conn.execute("SELECT id FROM sources").fetchall()}
+        accts = {r[0] for r in conn.execute("SELECT id FROM accounts").fetchall()}
+    assert "statement:citi-cc" in srcs
+    assert "statement:citi-cc:account" in accts
+
+
+def test_accounts_add_invalid_type_errors(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app,
+        ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"],
+    )
+    result = runner.invoke(app, ["accounts", "add", "--nickname", "x", "--type", "banana"])
+    assert result.exit_code != 0
+
+
+def test_ingest_with_no_prompt_stages_batch(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    runner.invoke(
+        app,
+        ["accounts", "add", "--nickname", "citi-cc", "--type", "credit_card", "--currency", "USD"],
+    )
+    cfg_dir = env
+    templates = cfg_dir / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            str(fixture),
+            "--account",
+            "citi-cc",
+            "--no-prompt",
+            "--no-archive",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "batch_id" in result.stdout
+
+
+def test_ingest_prompt_y_confirms(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    runner.invoke(
+        app,
+        ["accounts", "add", "--nickname", "citi-cc", "--type", "credit_card", "--currency", "USD"],
+    )
+    cfg_dir = env
+    (cfg_dir / "templates").mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    result = runner.invoke(
+        app,
+        ["ingest", str(fixture), "--account", "citi-cc", "--no-archive"],
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Confirmed" in result.stdout
+
+
+def test_batches_lists_pending(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    runner.invoke(app, ["accounts", "add", "--nickname", "citi-cc", "--type", "credit_card"])
+    (env / "templates").mkdir(parents=True, exist_ok=True)
+    (env / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    runner.invoke(
+        app, ["ingest", str(fixture), "--account", "citi-cc", "--no-prompt", "--no-archive"]
+    )
+
+    result = runner.invoke(app, ["batches"])
+    assert result.exit_code == 0, result.stdout
+    assert "statement:citi-cc" in result.stdout
+    assert "pending" in result.stdout
+
+
+def test_batch_confirm_then_status_shows_no_pending(
+    env: Path, monkeypatch: pytest.MonkeyPatch, tiny_fixtures_dir: Path
+) -> None:
+    _patch_client(monkeypatch, tiny_fixtures_dir)
+    runner.invoke(
+        app, ["init", "--token", "T", "--budget", "budget-tiny", "--nickname", "tiny", "--no-sync"]
+    )
+    runner.invoke(app, ["accounts", "add", "--nickname", "citi-cc", "--type", "credit_card"])
+    (env / "templates").mkdir(parents=True, exist_ok=True)
+    (env / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\n'
+        'payee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    runner.invoke(
+        app, ["ingest", str(fixture), "--account", "citi-cc", "--no-prompt", "--no-archive"]
+    )
+    # batch_id will be 1 since this is the only one
+    res2 = runner.invoke(app, ["batch", "confirm", "1"])
+    assert res2.exit_code == 0
+    assert "Confirmed" in res2.stdout
+
+    listing = runner.invoke(app, ["batches"])
+    # After confirmation, the default "pending" filter should show empty.
+    assert "No pending" in listing.stdout or "1" not in listing.stdout

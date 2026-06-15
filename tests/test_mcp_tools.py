@@ -175,3 +175,124 @@ def test_sync_ynab_all_runs_for_each_budget(store: Store, tiny_fixtures_dir: Pat
     assert results[0]["status"] == "success"
     assert results[0]["source_id"] == "ynab:budget-tiny"
     assert "reconciliation" in results[0]
+
+
+from homefinance.sources.statement.ingest import (  # noqa: E402
+    confirm_batch,
+    ingest_file,
+    register_account,
+)
+
+
+def _setup_citi_cc_template(store, tmp_path) -> tuple[Path, Path]:
+    """Register a citi-cc account, write its CSV template, and return
+    ``(config_dir, fixture_csv)`` for use by an ingest call."""
+    register_account(store, nickname="citi-cc", type="credit_card", currency="USD")
+    config_dir = tmp_path / "homefinance"
+    (config_dir / "templates").mkdir(parents=True)
+    (config_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\npayee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture = Path(__file__).resolve().parent / "fixtures" / "statement" / "tiny.csv"
+    return config_dir, fixture
+
+
+def _stage_pending_csv(store, tmp_path, tiny_fixtures_dir):
+    """Helper: register an account and stage a pending CSV batch."""
+    config_dir, fixture = _setup_citi_cc_template(store, tmp_path)
+    return ingest_file(
+        store,
+        path=fixture,
+        account_nickname="citi-cc",
+        config_dir=config_dir,
+        archive_dir=tmp_path / "archive",
+    )
+
+
+def test_query_transactions_excludes_pending_by_default(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    rows = query_transactions(synced_store)
+    # YNAB rows are present; statement pending rows should not be.
+    statuses = {r.get("status", "confirmed") for r in rows}
+    assert statuses == {"confirmed"} or all(r.get("status") != "pending_review" for r in rows)
+
+
+def test_query_transactions_includes_pending_when_opted_in(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    confirmed_only = query_transactions(synced_store)
+    with_pending = query_transactions(synced_store, include_pending=True)
+    assert len(with_pending) > len(confirmed_only)
+
+
+def test_summarize_spending_always_excludes_pending(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    preview = _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    before_total = sum(
+        r["total_minor"] for r in summarize_spending(synced_store, group_by="account")
+    )
+    confirm_batch(synced_store, preview.batch_id)
+    after_total = sum(
+        r["total_minor"] for r in summarize_spending(synced_store, group_by="account")
+    )
+    assert after_total != before_total
+
+
+def test_get_sync_status_includes_pending_batch_count(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    statuses = get_sync_status(synced_store)
+    by_id = {s["source_id"]: s for s in statuses}
+    assert "pending_batch_count" in by_id["statement:citi-cc"]
+    assert by_id["statement:citi-cc"]["pending_batch_count"] == 1
+
+
+from homefinance.mcp_server.tools import confirm_batch as mcp_confirm_batch  # noqa: E402
+from homefinance.mcp_server.tools import ingest_statement as mcp_ingest_statement  # noqa: E402
+from homefinance.mcp_server.tools import list_batches as mcp_list_batches  # noqa: E402
+from homefinance.mcp_server.tools import reject_batch as mcp_reject_batch  # noqa: E402
+
+
+def _mcp_ingest_citi_cc(store, tmp_path, *, archive: bool = True) -> dict:
+    """Run the citi-cc CSV through ``mcp_ingest_statement`` and return the preview dict."""
+    config_dir, fixture = _setup_citi_cc_template(store, tmp_path)
+    return mcp_ingest_statement(
+        store,
+        path=str(fixture),
+        account_nickname="citi-cc",
+        config_dir=str(config_dir),
+        archive_dir=str(tmp_path / "archive"),
+        archive=archive,
+    )
+
+
+def test_mcp_ingest_statement_returns_preview_dict(synced_store: Store, tmp_path: Path) -> None:
+    result = _mcp_ingest_citi_cc(synced_store, tmp_path)
+    assert result["batch_id"] >= 1
+    assert result["txn_count"] == 3
+    assert "first_transactions" in result
+
+
+def test_mcp_list_batches(synced_store: Store) -> None:
+    rows = mcp_list_batches(synced_store, review_status="pending")
+    assert isinstance(rows, list)
+
+
+def test_mcp_confirm_batch(synced_store: Store, tmp_path: Path) -> None:
+    preview = _mcp_ingest_citi_cc(synced_store, tmp_path)
+    result = mcp_confirm_batch(synced_store, batch_id=preview["batch_id"])
+    assert result["review_status"] == "confirmed"
+
+
+def test_mcp_reject_batch(synced_store: Store, tmp_path: Path) -> None:
+    preview = _mcp_ingest_citi_cc(synced_store, tmp_path)
+    result = mcp_reject_batch(synced_store, batch_id=preview["batch_id"])
+    assert result["review_status"] == "rejected"

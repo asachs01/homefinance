@@ -10,18 +10,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
+from homefinance.db import _upsert
 from homefinance.db.store import Store
-from homefinance.sources.base import (
-    AccountSource,
-    RemoteAccount,
-    RemoteCategory,
-    RemotePayee,
-    RemoteSubTxn,
-    RemoteTransaction,
-)
+from homefinance.sources.base import AccountSource, RemoteAccount
 from homefinance.sources.ynab.ids import make_id
 
 
@@ -37,12 +30,8 @@ class SyncRunResult:
     drift_report: str | None  # JSON string when reconciliation='drift'
 
 
-def _utcnow() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 def run_sync(source: AccountSource, store: Store) -> SyncRunResult:
-    started_at = _utcnow()
+    started_at = _upsert.utcnow()
     source.validate()
 
     row = store.execute(
@@ -52,32 +41,27 @@ def run_sync(source: AccountSource, store: Store) -> SyncRunResult:
 
     delta = source.pull(cursor)
 
-    counters: dict[str, int] = {
-        "inserted": 0,
-        "updated": 0,
-        "deleted": 0,
-        "accounts_touched": 0,
-    }
+    counters = _upsert.new_counters()
 
     with store.transaction():
         store.execute(
             "INSERT INTO sources (id, kind, nickname, config, created_at) "
             "VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT (id) DO UPDATE SET nickname = excluded.nickname",
-            (source.source_id, source.kind, source.nickname, None, _utcnow()),
+            (source.source_id, source.kind, source.nickname, None, _upsert.utcnow()),
         )
 
         for a in delta.accounts:
-            _upsert_account(store, source.source_id, a, counters)
+            _upsert.upsert_account(store, source.source_id, a, counters)
 
         for c in delta.categories:
-            _upsert_category(store, source.source_id, c)
+            _upsert.upsert_category(store, source.source_id, c)
 
         for p in delta.payees:
-            _upsert_payee(store, source.source_id, p)
+            _upsert.upsert_payee(store, source.source_id, p)
 
         for t in delta.transactions:
-            _upsert_transaction(store, source.source_id, t, counters)
+            _upsert.upsert_transaction(store, source.source_id, t, counters)
 
         store.execute(
             "INSERT INTO sync_state (source_id, last_sync_at, server_knowledge, "
@@ -86,7 +70,7 @@ def run_sync(source: AccountSource, store: Store) -> SyncRunResult:
             "last_sync_at = excluded.last_sync_at, "
             "server_knowledge = excluded.server_knowledge, "
             "last_error = NULL, last_error_at = NULL",
-            (source.source_id, _utcnow(), delta.new_cursor),
+            (source.source_id, _upsert.utcnow(), delta.new_cursor),
         )
 
         recon_status, drift_report = _reconcile(store, source.source_id, delta.accounts)
@@ -99,7 +83,7 @@ def run_sync(source: AccountSource, store: Store) -> SyncRunResult:
             (
                 source.source_id,
                 started_at,
-                _utcnow(),
+                _upsert.utcnow(),
                 "success",
                 counters["inserted"],
                 counters["updated"],
@@ -119,193 +103,6 @@ def run_sync(source: AccountSource, store: Store) -> SyncRunResult:
         accounts_touched=counters["accounts_touched"],
         reconciliation=recon_status,
         drift_report=drift_report,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Upserts
-
-
-def _upsert_account(
-    store: Store, source_id: str, a: RemoteAccount, counters: dict[str, int]
-) -> None:
-    acct_id = make_id(source_id, a.external_id)
-    store.execute(
-        "INSERT INTO accounts (id, source_id, external_id, name, type, on_budget, "
-        "closed, deleted, currency, cleared_balance_minor, uncleared_balance_minor, "
-        "balance_as_of, last_synced_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT (source_id, external_id) DO UPDATE SET "
-        "name = excluded.name, type = excluded.type, on_budget = excluded.on_budget, "
-        "closed = excluded.closed, deleted = excluded.deleted, "
-        "currency = excluded.currency, "
-        "cleared_balance_minor = excluded.cleared_balance_minor, "
-        "uncleared_balance_minor = excluded.uncleared_balance_minor, "
-        "balance_as_of = excluded.balance_as_of, "
-        "last_synced_at = excluded.last_synced_at",
-        (
-            acct_id,
-            source_id,
-            a.external_id,
-            a.name,
-            a.type,
-            int(a.on_budget),
-            int(a.closed),
-            int(a.deleted),
-            a.currency,
-            a.cleared_balance_minor,
-            a.uncleared_balance_minor,
-            a.balance_as_of,
-            _utcnow(),
-        ),
-    )
-    counters["accounts_touched"] += 1
-
-
-def _upsert_category(store: Store, source_id: str, c: RemoteCategory) -> None:
-    cat_id = make_id(source_id, c.external_id)
-    store.execute(
-        "INSERT INTO categories (id, source_id, external_id, name, group_name, "
-        "hidden, deleted) VALUES (?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT (source_id, external_id) DO UPDATE SET "
-        "name = excluded.name, group_name = excluded.group_name, "
-        "hidden = excluded.hidden, deleted = excluded.deleted",
-        (cat_id, source_id, c.external_id, c.name, c.group_name, int(c.hidden), int(c.deleted)),
-    )
-
-
-def _upsert_payee(store: Store, source_id: str, p: RemotePayee) -> None:
-    payee_id = make_id(source_id, p.external_id)
-    transfer_acct_id = (
-        make_id(source_id, p.transfer_account_external_id)
-        if p.transfer_account_external_id
-        else None
-    )
-    store.execute(
-        "INSERT INTO payees (id, source_id, external_id, name, transfer_account_id, "
-        "deleted) VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT (source_id, external_id) DO UPDATE SET "
-        "name = excluded.name, transfer_account_id = excluded.transfer_account_id, "
-        "deleted = excluded.deleted",
-        (payee_id, source_id, p.external_id, p.name, transfer_acct_id, int(p.deleted)),
-    )
-
-
-def _upsert_transaction(
-    store: Store, source_id: str, t: RemoteTransaction, counters: dict[str, int]
-) -> None:
-    txn_id = make_id(source_id, t.external_id)
-    acct_id = make_id(source_id, t.account_external_id)
-    category_id = make_id(source_id, t.category_external_id) if t.category_external_id else None
-    payee_id = make_id(source_id, t.payee_external_id) if t.payee_external_id else None
-    transfer_acct_id = (
-        make_id(source_id, t.transfer_account_external_id)
-        if t.transfer_account_external_id
-        else None
-    )
-    is_split_parent = 1 if t.subtransactions else 0
-
-    existed = (
-        store.execute("SELECT 1 FROM transactions WHERE id = ?", (txn_id,)).fetchone() is not None
-    )
-
-    store.execute(
-        "INSERT INTO transactions (id, source_id, external_id, account_id, date, "
-        "amount_minor, currency, payee, payee_id, memo, category_id, cleared, "
-        "approved, flag_color, import_id, transfer_account_id, parent_id, "
-        "is_split_parent, deleted, raw, synced_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?) "
-        "ON CONFLICT (source_id, external_id) DO UPDATE SET "
-        "date = excluded.date, amount_minor = excluded.amount_minor, "
-        "payee = excluded.payee, payee_id = excluded.payee_id, memo = excluded.memo, "
-        "category_id = excluded.category_id, cleared = excluded.cleared, "
-        "approved = excluded.approved, flag_color = excluded.flag_color, "
-        "transfer_account_id = excluded.transfer_account_id, "
-        "is_split_parent = excluded.is_split_parent, deleted = excluded.deleted, "
-        "raw = excluded.raw, synced_at = excluded.synced_at",
-        (
-            txn_id,
-            source_id,
-            t.external_id,
-            acct_id,
-            t.date,
-            t.amount_minor,
-            t.currency,
-            t.payee,
-            payee_id,
-            t.memo,
-            category_id,
-            t.cleared,
-            int(t.approved),
-            t.flag_color,
-            t.import_id,
-            transfer_acct_id,
-            is_split_parent,
-            int(t.deleted),
-            None,
-            _utcnow(),
-        ),
-    )
-
-    if t.deleted:
-        counters["deleted"] += 1
-    elif existed:
-        counters["updated"] += 1
-    else:
-        counters["inserted"] += 1
-
-    if t.subtransactions:
-        # Rewrite children atomically: delete then re-insert so the latest
-        # split shape always reflects YNAB's truth.
-        store.execute("DELETE FROM transactions WHERE parent_id = ?", (txn_id,))
-        for i, sub in enumerate(t.subtransactions):
-            _insert_subtransaction(store, source_id, txn_id, acct_id, t, sub, i)
-
-
-def _insert_subtransaction(
-    store: Store,
-    source_id: str,
-    parent_id: str,
-    acct_id: str,
-    parent: RemoteTransaction,
-    sub: RemoteSubTxn,
-    index: int,
-) -> None:
-    sub_external = f"{parent.external_id}:sub:{index}"
-    sub_id = make_id(source_id, sub_external)
-    category_id = make_id(source_id, sub.category_external_id) if sub.category_external_id else None
-    payee_id = make_id(source_id, sub.payee_external_id) if sub.payee_external_id else None
-    transfer_acct_id = (
-        make_id(source_id, sub.transfer_account_external_id)
-        if sub.transfer_account_external_id
-        else None
-    )
-    store.execute(
-        "INSERT INTO transactions (id, source_id, external_id, account_id, date, "
-        "amount_minor, currency, payee, payee_id, memo, category_id, cleared, "
-        "approved, flag_color, import_id, transfer_account_id, parent_id, "
-        "is_split_parent, deleted, raw, synced_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?)",
-        (
-            sub_id,
-            source_id,
-            sub_external,
-            acct_id,
-            parent.date,
-            sub.amount_minor,
-            parent.currency,
-            parent.payee,
-            payee_id,
-            sub.memo,
-            category_id,
-            parent.cleared,
-            int(parent.approved),
-            parent.flag_color,
-            parent.import_id,
-            transfer_acct_id,
-            parent_id,
-            _utcnow(),
-        ),
     )
 
 

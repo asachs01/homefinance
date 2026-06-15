@@ -19,6 +19,25 @@ from homefinance.config import YNABBudget, load_config
 from homefinance.db.migrate import migrate
 from homefinance.db.store import Store
 from homefinance.sources.base import AccountSource
+from homefinance.sources.statement.ingest import (
+    AccountAlreadyRegistered,
+)
+from homefinance.sources.statement.ingest import (
+    confirm_batch as _confirm_batch,
+)
+from homefinance.sources.statement.ingest import (
+    ingest_file as _ingest_file,
+)
+from homefinance.sources.statement.ingest import (
+    list_batches as _list_batches,
+)
+from homefinance.sources.statement.ingest import (
+    register_account as _register_statement_account,
+)
+from homefinance.sources.statement.ingest import (
+    reject_batch as _reject_batch,
+)
+from homefinance.sources.statement.parsers.base import StatementIngestError
 from homefinance.sources.ynab.client import YNABClient
 from homefinance.sources.ynab.source import YNABAccountSource
 from homefinance.sources.ynab.sync import run_sync
@@ -99,7 +118,9 @@ def status() -> None:
         "SELECT s.id AS source_id, s.kind, s.nickname, "
         "ss.last_sync_at, ss.server_knowledge, "
         "(SELECT reconciliation FROM sync_runs WHERE source_id = s.id "
-        " ORDER BY id DESC LIMIT 1) AS last_recon "
+        " ORDER BY id DESC LIMIT 1) AS last_recon, "
+        "(SELECT COUNT(*) FROM statement_batches "
+        " WHERE source_id = s.id AND review_status = 'pending') AS pending_batches "
         "FROM sources s "
         "LEFT JOIN sync_state ss ON ss.source_id = s.id "
         "ORDER BY s.id"
@@ -115,6 +136,7 @@ def status() -> None:
     table.add_column("last sync")
     table.add_column("cursor", justify="right")
     table.add_column("reconciliation")
+    table.add_column("pending", justify="right")
     for r in rows:
         table.add_row(
             r["source_id"],
@@ -122,6 +144,7 @@ def status() -> None:
             r["last_sync_at"] or "(never)",
             str(r["server_knowledge"] or "-"),
             r["last_recon"] or "-",
+            str(r["pending_batches"] or "-"),
         )
     console.print(table)
 
@@ -292,3 +315,199 @@ def ynab_remove_budget(
     console.print(
         f"[yellow]Removed[/] budget {budget_id} from config. Existing data in the DB is preserved."
     )
+
+
+accounts_app = typer.Typer(help="Manage local accounts (e.g., statement-fed).")
+app.add_typer(accounts_app, name="accounts")
+
+
+@accounts_app.command("add")
+def accounts_add(
+    nickname: str = typer.Option(..., "--nickname", "-n"),
+    account_type: str = typer.Option(
+        ...,
+        "--type",
+        "-t",
+        help="checking | savings | credit_card | investment | loan | cash | other",
+    ),
+    currency: str = typer.Option("USD", "--currency"),
+    display_name: str | None = typer.Option(None, "--display-name"),
+) -> None:
+    """Register a statement-fed account in the local store."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        migrate(cfg.db_path)
+    store = Store.open(cfg.db_path)
+    try:
+        ra = _register_statement_account(
+            store,
+            nickname=nickname,
+            type=account_type,
+            currency=currency,
+            display_name=display_name,
+        )
+    except AccountAlreadyRegistered as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[green]Added[/] {ra.source_id} (type: {ra.type}, currency: {ra.currency})")
+
+
+def _render_preview(preview: object) -> Table:
+    """Render a BatchPreview as a small Rich table for inline confirmation."""
+    from homefinance.sources.statement.ingest import BatchPreview
+
+    p = preview if isinstance(preview, BatchPreview) else None
+    assert p is not None
+    summary = Table(title=f"Batch #{p.batch_id} — {p.source_id}")
+    summary.add_column("field")
+    summary.add_column("value")
+    summary.add_row("transactions", str(p.txn_count))
+    summary.add_row(
+        "period",
+        f"{p.statement_period_start or '?'} → {p.statement_period_end or '?'}",
+    )
+    summary.add_row(
+        "reconciliation",
+        f"{p.reconciliation_status}"
+        + (f" (drift: {p.drift_minor / 100:+.2f})" if p.drift_minor else ""),
+    )
+    return summary
+
+
+@app.command()
+def ingest(
+    path: str = typer.Argument(...),
+    account: str = typer.Option(..., "--account", "-a"),
+    no_archive: bool = typer.Option(False, "--no-archive"),
+    no_prompt: bool = typer.Option(False, "--no-prompt"),
+    reingest: bool = typer.Option(False, "--reingest"),
+) -> None:
+    """Parse + stage a statement file; prompt to confirm or reject."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        migrate(cfg.db_path)
+    store = Store.open(cfg.db_path)
+
+    try:
+        preview = _ingest_file(
+            store,
+            path=Path(path),
+            account_nickname=account,
+            config_dir=cfg.config_path.parent,
+            archive_dir=cfg.config_path.parent / "archive",
+            archive=not no_archive,
+            allow_reingest=reingest,
+        )
+    except StatementIngestError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+
+    console.print(_render_preview(preview))
+
+    if no_prompt:
+        console.print(
+            f"[yellow]Staged[/] batch_id={preview.batch_id} "
+            "(pending review). Confirm with: "
+            f"[bold]homefinance batch confirm {preview.batch_id}[/]"
+        )
+        return
+
+    choice = typer.prompt("Confirm? [y/N/show-more]", default="N").strip().lower()
+    if choice == "show-more":
+        for t in preview.first_transactions:
+            console.print(
+                f"  {t.date}  {t.amount_minor / 100:+9.2f}  {t.payee or '-'}  {t.memo or ''}"
+            )
+        choice = typer.prompt("Confirm? [y/N]", default="N").strip().lower()
+    if choice == "y":
+        _confirm_batch(store, preview.batch_id)
+        console.print(f"[green]Confirmed[/] batch #{preview.batch_id}.")
+    else:
+        _reject_batch(store, preview.batch_id)
+        console.print(f"[yellow]Rejected[/] batch #{preview.batch_id}.")
+
+
+@app.command()
+def batches(
+    pending: bool = typer.Option(True, "--pending"),
+    confirmed: bool = typer.Option(False, "--confirmed"),
+    rejected: bool = typer.Option(False, "--rejected"),
+    all_: bool = typer.Option(False, "--all"),
+    source: str | None = typer.Option(None, "--source"),
+) -> None:
+    """List statement batches in the local store."""
+    del pending  # default-on flag; selection logic below honors the others first
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        console.print("[yellow]No database. Nothing to list.[/]")
+        return
+    store = Store.open(cfg.db_path)
+
+    if all_:
+        status = None
+    elif rejected:
+        status = "rejected"
+    elif confirmed:
+        status = "confirmed"
+    else:
+        status = "pending"
+
+    rows = _list_batches(store, source_id=source, review_status=status)
+    if not rows:
+        label = "any" if status is None else status
+        console.print(f"[yellow]No {label} batches.[/]")
+        return
+
+    table = Table(title=f"Statement Batches ({status or 'all'})")
+    table.add_column("batch_id", justify="right")
+    table.add_column("source", no_wrap=True)
+    table.add_column("parsed_at", no_wrap=True)
+    table.add_column("count", justify="right")
+    table.add_column("reconciliation")
+    table.add_column("status")
+    for r in rows:
+        recon = r["reconciliation_status"]
+        if r["drift_minor"]:
+            recon += f" ({r['drift_minor'] / 100:+.2f})"
+        table.add_row(
+            str(r["id"]),
+            r["source_id"],
+            r["parsed_at"],
+            str(r["txn_count"]),
+            recon,
+            r["review_status"],
+        )
+    console.print(table)
+
+
+batch_app = typer.Typer(help="Per-batch operations.")
+app.add_typer(batch_app, name="batch")
+
+
+@batch_app.command("confirm")
+def batch_confirm_cmd(batch_id: int) -> None:
+    """Confirm a pending batch."""
+    cfg = load_config()
+    store = Store.open(cfg.db_path)
+    try:
+        _confirm_batch(store, batch_id)
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[green]Confirmed[/] batch #{batch_id}.")
+
+
+@batch_app.command("reject")
+def batch_reject_cmd(batch_id: int) -> None:
+    """Reject a pending batch (deletes its staged transactions)."""
+    cfg = load_config()
+    store = Store.open(cfg.db_path)
+    try:
+        _reject_batch(store, batch_id)
+    except ValueError as e:
+        err_console.print(f"[red]{e}[/]")
+        raise typer.Exit(code=1) from None
+    console.print(f"[yellow]Rejected[/] batch #{batch_id}.")

@@ -34,6 +34,8 @@ Pick one based on context; do not ask all four:
 
 - Amounts are stored in **signed integer minor units (cents)**. Negative = outflow. Convert to dollars only in user-facing output.
 - Never call `sync_ynab` unprompted. The user controls when to refresh.
+- Statement-imported transactions live in two states: **`confirmed`** (analytically visible) and **`pending_review`** (excluded by default). If the user explicitly asks "what's awaiting review?" pass `include_pending=True` to `query_transactions`. Never include pending rows in spending summaries — `summarize_spending` already filters them out.
+- If `get_sync_status` shows `pending_batch_count > 0` for any source, mention it: the user may have forgotten to confirm a batch. Suggest `/homefinance:import-statement` or `homefinance batch confirm <id>`.
 - If `get_sync_status` shows `last_reconciliation = 'drift'`, mention it briefly when relevant (e.g., the user asks about balances) but do not block the analysis.
 - If the user asks a question the read tools cannot answer (e.g., projection, allocation, retirement planning), say so honestly — those land in SP3 / SP4.
 

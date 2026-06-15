@@ -13,15 +13,21 @@ src/homefinance/
 │   ├── migrate.py      # yoyo runner
 │   └── store.py        # Store: PRAGMAs + atomic-transaction context + Row reads
 ├── sources/
-│   ├── base.py         # AccountSource Protocol + RemoteX dataclasses ← the SP2 seam
-│   └── ynab/
-│       ├── models.py       # Pydantic models for the YNAB API subset we consume
-│       ├── client.py       # read-only HTTP client (httpx + tenacity)
-│       ├── fake_client.py  # JSON-fixture-backed test double
-│       ├── ids.py          # deterministic ID helpers (ynab:<budget>:<external>)
-│       ├── mapping.py      # YNAB → canonical (pure functions; money conversion)
-│       ├── source.py       # YNABAccountSource — implements AccountSource
-│       └── sync.py         # run_sync — generic orchestrator over AccountSource
+│   ├── base.py         # AccountSource Protocol + RemoteX dataclasses ← the seam (unchanged by SP2)
+│   ├── ynab/           # SP1 adapter
+│   │   ├── models.py       # Pydantic models for the YNAB API subset we consume
+│   │   ├── client.py       # read-only HTTP client (httpx + tenacity)
+│   │   ├── fake_client.py  # JSON-fixture-backed test double
+│   │   ├── ids.py          # deterministic ID helpers (ynab:<budget>:<external>)
+│   │   ├── mapping.py      # YNAB → canonical (pure functions; money conversion)
+│   │   ├── source.py       # YNABAccountSource — implements AccountSource
+│   │   └── sync.py         # run_sync — generic orchestrator over AccountSource
+│   └── statement/      # SP2 adapter
+│       ├── source.py       # StatementAccountSource
+│       ├── ingest.py       # ingest_file orchestrator + confirm/reject
+│       ├── archive.py      # source-file archiving
+│       ├── templates.py    # per-account TOML template loader
+│       └── parsers/        # Strategy registry; lazy-imported parser impls
 ├── mcp_server/
 │   ├── __main__.py     # stdio entry; FastMCP tool registrations
 │   └── tools.py        # tool implementations as plain functions (testable)
@@ -45,6 +51,16 @@ The design enforces these *by construction*, not by convention.
 ## Atomic sync
 
 `run_sync` stages all upserts in memory, then applies them inside a single SQLite `BEGIN/COMMIT` together with the new `server_knowledge` cursor and the `sync_runs` row. Either the whole sync moves forward or nothing does; the next run retries from the same cursor.
+
+## Two-phase write path (SP2)
+
+Statement parses don't go straight into the canonical store. Pipeline:
+
+1. `ingest_file` parses + reconciles + stages rows with `status='pending_review'` and `batch_id=<batch>`.
+2. The user reviews via the `homefinance-import-statement` skill or the `homefinance ingest` CLI prompt.
+3. `confirm_batch` atomically flips the rows to `status='confirmed'`. `reject_batch` deletes them; the `statement_batches` row stays for audit.
+
+`summarize_spending` always filters `status='confirmed'`. `query_transactions` excludes pending rows by default; opt in with `include_pending=True`.
 
 ## Tools vs skills
 

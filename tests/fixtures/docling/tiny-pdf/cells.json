@@ -1,0 +1,14 @@
+{
+  "statement_period_start": "2026-06-01",
+  "statement_period_end": "2026-06-30",
+  "opening_balance_minor": 1234560,
+  "closing_balance_minor": 1100000,
+  "table": {
+    "header": ["Date", "Description", "Amount"],
+    "rows": [
+      ["06/01/2026", "Trader Joe's", "-45.67"],
+      ["06/02/2026", "Shell", "-50.00"],
+      ["06/03/2026", "Refund", "10.00"]
+    ]
+  }
+}

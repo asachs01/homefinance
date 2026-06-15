@@ -32,6 +32,20 @@ You are guiding a user through the first-run setup of the homefinance plugin.
 - `No budgets configured` after `init` → re-run `homefinance ynab add-budget --budget-id <id> --nickname <name>` (use the budget IDs from `list_sources` on the YNAB site).
 - `Database is locked` → another `homefinance` process is mid-sync; wait and retry.
 
+## Statement-fed accounts (SP2)
+
+For accounts YNAB does not already cover (e.g., a credit card whose data only comes from a downloaded PDF or CSV), register them locally before ingesting any statement file:
+
+1. Tell the user to run, for each non-YNAB account:
+   ```
+   homefinance accounts add --nickname citi-cc --type credit_card --currency USD
+   ```
+   Valid types: `checking`, `savings`, `credit_card`, `investment`, `loan`, `cash`, `other`.
+
+2. If the parser they need is **CSV** or **Docling PDF**, that account also needs a per-account template at `~/.homefinance/templates/statement:<nickname>.toml`. Walk them through writing one based on what their bank actually exports. OFX/QFX never need a template.
+
+3. Once an account is registered (and template authored if needed), invoke the `/homefinance:import-statement` skill to walk through ingesting their first file.
+
 ## What to do after setup succeeds
 
 Suggest the `homefinance-explore` skill (or `/homefinance:explore`) for a guided first look at the data.

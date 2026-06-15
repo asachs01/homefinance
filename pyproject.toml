@@ -36,6 +36,18 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
 ]
+# Lightweight, pure-Python parsers (OFX/QFX). No torch, so default CI can
+# install this to exercise the OFX/QFX tests without the heavy Docling stack.
+ofx = [
+    "ofxtools>=0.10",
+]
+# Full statement-ingest support: OFX/QFX plus Docling PDF (pulls PyTorch +
+# ~200MB of layout models on first use). Only the manual ci-docling job and
+# end users who need PDF parsing install this.
+ingest = [
+    "ofxtools>=0.10",
+    "docling>=2.0",
+]
 
 [project.scripts]
 homefinance = "homefinance.cli:app"
@@ -69,9 +81,20 @@ warn_unused_configs = true
 module = ["yoyo.*"]
 ignore_missing_imports = true
 
+# docling/ofxtools live in optional extras and are lazy-imported. Default CI
+# typechecks with only [dev,ofx] installed (no Docling), so mypy must not error
+# when it can't resolve these modules. The flag is a no-op when they ARE present
+# (e.g. the full [ingest] dev venv), so it stays correct in both environments.
+[[tool.mypy.overrides]]
+module = ["docling.*", "ofxtools.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config --ignore=tests/integration"
 testpaths = ["tests"]
+markers = [
+    "docling: live Docling tests; only run with `pytest tests/integration -m docling`",
+]
 filterwarnings = [
     "error",
     # yoyo-migrations relies on sqlite3's default datetime adapter, which

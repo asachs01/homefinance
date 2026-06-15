@@ -78,12 +78,14 @@ def query_transactions(
     amount_max_minor: int | None = None,
     cleared: str | None = None,
     include_deleted: bool = False,
+    include_pending: bool = False,
     mode: str = "leaves",
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict]:  # type: ignore[type-arg]
     """List transactions. ``mode='leaves'`` (default) gives the analysis view;
-    ``mode='tops'`` gives the user-facing 'one transaction per split' view."""
+    ``mode='tops'`` gives the user-facing 'one transaction per split' view.
+    ``include_pending=True`` includes statement rows awaiting review."""
     return _tools.query_transactions(
         _store_cached(),
         source_id=source_id,
@@ -96,6 +98,7 @@ def query_transactions(
         amount_max_minor=amount_max_minor,
         cleared=cleared,
         include_deleted=include_deleted,
+        include_pending=include_pending,
         mode=mode,  # type: ignore[arg-type]
         limit=limit,
         offset=offset,
@@ -157,6 +160,45 @@ def sync_ynab(source_id: str | None = None) -> list[dict]:  # type: ignore[type-
         if not sources:
             raise ValueError(f"source {source_id!r} not configured")
     return _tools.sync_ynab_all(_store_cached(), [_cast(_AccountSource, s) for s in sources])
+
+
+@mcp.tool()
+def ingest_statement(
+    path: str,
+    account_nickname: str,
+    archive: bool = True,
+) -> dict:  # type: ignore[type-arg]
+    """Parse + stage one statement file. Returns the BatchPreview as a dict."""
+    cfg_dir = _cfg_cached().config_path.parent
+    return _tools.ingest_statement(
+        _store_cached(),
+        path=path,
+        account_nickname=account_nickname,
+        config_dir=str(cfg_dir),
+        archive_dir=str(cfg_dir / "archive"),
+        archive=archive,
+    )
+
+
+@mcp.tool()
+def list_batches(
+    source_id: str | None = None,
+    review_status: str = "pending",
+) -> list[dict]:  # type: ignore[type-arg]
+    """List statement batches in the local store."""
+    return _tools.list_batches(_store_cached(), source_id=source_id, review_status=review_status)
+
+
+@mcp.tool()
+def confirm_batch(batch_id: int) -> dict:  # type: ignore[type-arg]
+    """Promote a pending batch's transactions to status='confirmed'."""
+    return _tools.confirm_batch(_store_cached(), batch_id=batch_id)
+
+
+@mcp.tool()
+def reject_batch(batch_id: int) -> dict:  # type: ignore[type-arg]
+    """Delete a pending batch's staged transactions; preserve the batch row."""
+    return _tools.reject_batch(_store_cached(), batch_id=batch_id)
 
 
 if __name__ == "__main__":  # pragma: no cover
