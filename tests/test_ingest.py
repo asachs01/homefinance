@@ -43,9 +43,7 @@ def test_register_account_creates_source_and_account_rows(store: Store) -> None:
     assert src["kind"] == "statement"
     assert src["nickname"] == "Citi Credit Card"
 
-    acct = store.execute(
-        "SELECT id, source_id, external_id, name, type FROM accounts"
-    ).fetchone()
+    acct = store.execute("SELECT id, source_id, external_id, name, type FROM accounts").fetchone()
     assert acct["id"] == "statement:citi-cc:account"
     assert acct["source_id"] == "statement:citi-cc"
     assert acct["external_id"] == "account"

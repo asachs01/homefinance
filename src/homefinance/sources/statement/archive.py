@@ -15,9 +15,7 @@ from pathlib import Path
 from homefinance.sources.statement.parsers.base import ArchiveFailed
 
 
-def archive_file(
-    source: Path, *, source_id: str, file_hash: str, archive_dir: Path
-) -> Path:
+def archive_file(source: Path, *, source_id: str, file_hash: str, archive_dir: Path) -> Path:
     source = Path(source)
     if not source.exists():
         raise ArchiveFailed(f"source file not found: {source}")

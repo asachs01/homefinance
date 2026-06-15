@@ -352,14 +352,13 @@ def accounts_add(
     except ValueError as e:
         err_console.print(f"[red]{e}[/]")
         raise typer.Exit(code=1) from None
-    console.print(
-        f"[green]Added[/] {ra.source_id} (type: {ra.type}, currency: {ra.currency})"
-    )
+    console.print(f"[green]Added[/] {ra.source_id} (type: {ra.type}, currency: {ra.currency})")
 
 
 def _render_preview(preview: object) -> Table:
     """Render a BatchPreview as a small Rich table for inline confirmation."""
     from homefinance.sources.statement.ingest import BatchPreview
+
     p = preview if isinstance(preview, BatchPreview) else None
     assert p is not None
     summary = Table(title=f"Batch #{p.batch_id} — {p.source_id}")
@@ -420,8 +419,7 @@ def ingest(
     if choice == "show-more":
         for t in preview.first_transactions:
             console.print(
-                f"  {t.date}  {t.amount_minor / 100:+9.2f}  "
-                f"{t.payee or '-'}  {t.memo or ''}"
+                f"  {t.date}  {t.amount_minor / 100:+9.2f}  {t.payee or '-'}  {t.memo or ''}"
             )
         choice = typer.prompt("Confirm? [y/N]", default="N").strip().lower()
     if choice == "y":

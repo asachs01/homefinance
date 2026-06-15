@@ -80,6 +80,8 @@ def test_docling_pdf_module_does_not_import_docling_at_import_time() -> None:
 
     leaks_before = _docling_pkg_modules()
     import homefinance.sources.statement.parsers.docling_pdf  # noqa: F401
+
     leaks_after = _docling_pkg_modules()
-    assert leaks_after - leaks_before == set(), \
+    assert leaks_after - leaks_before == set(), (
         f"importing docling_pdf eagerly loaded docling: {leaks_after - leaks_before}"
+    )

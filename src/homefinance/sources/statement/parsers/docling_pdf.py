@@ -111,8 +111,7 @@ def _extract_cells_with_docling(path: Path) -> dict[str, Any]:
         from docling.document_converter import DocumentConverter
     except ImportError as e:
         raise ParseError(
-            "docling is required for PDF parsing. "
-            "Install with: pip install 'homefinance[ingest]'"
+            "docling is required for PDF parsing. Install with: pip install 'homefinance[ingest]'"
         ) from e
 
     converter = DocumentConverter()

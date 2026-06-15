@@ -138,17 +138,14 @@ def register_account(
     account_id = f"{source_id}:account"
     name = display_name or nickname
 
-    existing = store.execute(
-        "SELECT 1 FROM sources WHERE id = ?", (source_id,)
-    ).fetchone()
+    existing = store.execute("SELECT 1 FROM sources WHERE id = ?", (source_id,)).fetchone()
     if existing:
         raise AccountAlreadyRegistered(f"source {source_id!r} already exists")
 
     now = _utcnow()
     with store.transaction():
         store.execute(
-            "INSERT INTO sources (id, kind, nickname, config, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO sources (id, kind, nickname, config, created_at) VALUES (?, ?, ?, ?, ?)",
             (source_id, "statement", name, None, now),
         )
         store.execute(
@@ -217,8 +214,7 @@ def ingest_file(
 
     # File-level dedup — fetch prior batch (if any) and act on it.
     prior = store.execute(
-        "SELECT id, review_status FROM statement_batches "
-        "WHERE file_hash = ? AND source_id = ?",
+        "SELECT id, review_status FROM statement_batches WHERE file_hash = ? AND source_id = ?",
         (file_hash, account.source_id),
     ).fetchone()
     if prior and not allow_reingest and prior["review_status"] in ("pending", "confirmed"):
@@ -240,15 +236,11 @@ def ingest_file(
     stamped: list[RemoteTransaction] = []
     txn_total = 0
     for txn in parsed.transactions:
-        base = row_external_id(
-            account.account_id, txn.date, txn.amount_minor, txn.payee, txn.memo
-        )
+        base = row_external_id(account.account_id, txn.date, txn.amount_minor, txn.payee, txn.memo)
         n = seen[base]
         external_id = base if n == 0 else f"{base}:{n}"
         seen[base] += 1
-        stamped.append(
-            replace(txn, external_id=external_id, account_external_id="account")
-        )
+        stamped.append(replace(txn, external_id=external_id, account_external_id="account"))
         txn_total += txn.amount_minor
 
     recon_status, drift_minor = reconcile(
@@ -340,9 +332,7 @@ def confirm_batch(store: Store, batch_id: int) -> dict[str, Any]:
     if row is None:
         raise ValueError(f"batch {batch_id} not found")
     if row["review_status"] != "pending":
-        raise ValueError(
-            f"batch {batch_id} is not pending (status: {row['review_status']!r})"
-        )
+        raise ValueError(f"batch {batch_id} is not pending (status: {row['review_status']!r})")
 
     now = _utcnow()
     with store.transaction():
@@ -369,9 +359,7 @@ def reject_batch(store: Store, batch_id: int) -> dict[str, Any]:
     if row is None:
         raise ValueError(f"batch {batch_id} not found")
     if row["review_status"] != "pending":
-        raise ValueError(
-            f"batch {batch_id} is not pending (status: {row['review_status']!r})"
-        )
+        raise ValueError(f"batch {batch_id} is not pending (status: {row['review_status']!r})")
 
     now = _utcnow()
     with store.transaction():

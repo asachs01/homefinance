@@ -14,9 +14,7 @@ from homefinance.sources.statement.parsers.base import (
 )
 
 
-def _parse_with_ofxtools(
-    path: Path, account: ResolvedAccount, format_name: str
-) -> ParsedStatement:
+def _parse_with_ofxtools(path: Path, account: ResolvedAccount, format_name: str) -> ParsedStatement:
     # Lazy import so the lean install never touches ofxtools.
     try:
         from ofxtools.Parser import OFXTree
@@ -68,9 +66,7 @@ def _parse_with_ofxtools(
         )
 
     ledger_bal = getattr(stmt, "ledgerbal", None)
-    closing = (
-        round(float(ledger_bal.balamt) * 100) if ledger_bal is not None else None
-    )
+    closing = round(float(ledger_bal.balamt) * 100) if ledger_bal is not None else None
 
     period_start = (
         stmt.transactions.dtstart.date().isoformat()

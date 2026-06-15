@@ -48,8 +48,7 @@ def find_parser(path: Path) -> type[StatementParser]:
         if cls.claims(Path(path)):
             return cls
     raise NoSuitableParser(
-        f"no parser knows {str(path)!r} (saw extension {ext!r}). "
-        "Supported: csv, ofx, qfx, pdf."
+        f"no parser knows {str(path)!r} (saw extension {ext!r}). Supported: csv, ofx, qfx, pdf."
     )
 
 

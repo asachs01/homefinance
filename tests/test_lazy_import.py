@@ -16,9 +16,7 @@ def test_homefinance_does_not_import_docling_at_package_import_time() -> None:
         "         if m == 'docling' or m.startswith('docling.')]; "
         "assert leaks == [], f'Docling leaked: {leaks}'"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True
-    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -30,7 +28,5 @@ def test_homefinance_does_not_import_ofxtools_at_package_import_time() -> None:
         "         if m == 'ofxtools' or m.startswith('ofxtools.')]; "
         "assert leaks == [], f'ofxtools leaked: {leaks}'"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True
-    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
