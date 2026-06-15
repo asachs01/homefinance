@@ -99,3 +99,21 @@ def test_roth_married_separately_band() -> None:
     )
     assert out["status"] == "partial"
     assert out["roth_limit_minor"] == 350000
+
+
+def test_roth_partial_exact_10_boundary_no_float_overshoot() -> None:
+    lim = load_limits(2025)
+    # single band $150k-$165k. MAGI $156,150 → remaining = $7,000 * (165000-156150)/15000
+    # = $7,000 * 8850/15000 = $4,130.00 exactly — must NOT round up to $4,140.
+    out = roth_eligibility(filing_status="single", magi_minor=15615000, age=40, limits=lim)
+    assert out["status"] == "partial"
+    assert out["roth_limit_minor"] == 413000  # $4,130, not $4,140
+
+
+def test_roth_partial_fractional_rounds_up_to_next_10() -> None:
+    lim = load_limits(2025)
+    # A MAGI whose exact remaining is NOT a $10 multiple must round UP to the next $10.
+    # MAGI $156,160 → $7,000 * (165000-156160)/15000 = $7,000 * 8840/15000 = $4,125.33...
+    # rounds UP to $4,130.
+    out = roth_eligibility(filing_status="single", magi_minor=15616000, age=40, limits=lim)
+    assert out["roth_limit_minor"] == 413000  # rounded up from $4,125.33 → $4,130

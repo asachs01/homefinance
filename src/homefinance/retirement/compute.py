@@ -7,7 +7,6 @@ informational; callers attach DISCLAIMER.
 
 from __future__ import annotations
 
-import math
 from datetime import date
 from typing import Any
 
@@ -16,6 +15,9 @@ DISCLAIMER = (
     "limits and phase-outs are summarized from IRS sources for the stated tax "
     "year; verify against current IRS publications before acting."
 )
+
+ROTH_ROUND_MINOR = 1000  # IRS worksheet rounds the reduced Roth limit up to the nearest $10
+ROTH_FLOOR_MINOR = 20000  # a positive reduced limit below $200 is floored to $200
 
 
 def _ira_limit_with_catchup(age: int, limits: dict[str, Any]) -> tuple[int, int]:
@@ -48,11 +50,6 @@ def contribution_deadline(tax_year: int) -> str:
     A documented simplification — not adjusted for weekends/holidays/extensions.
     """
     return date(tax_year + 1, 4, 15).isoformat()
-
-
-def _round_up_to_nearest_10_dollars(amount_minor: float) -> int:
-    """Round a cents amount up to the nearest $10 (1000 cents) — IRS worksheet rule."""
-    return math.ceil(amount_minor / 1000) * 1000
 
 
 def _phaseout_band_key(filing_status: str) -> str:
@@ -97,13 +94,19 @@ def roth_eligibility(
             "band_high_minor": high,
         }
 
-    frac = (magi_minor - low) / (high - low)
-    reduced = _round_up_to_nearest_10_dollars(full_limit * (1.0 - frac))
-    if 0 < reduced < 20000:  # IRS $200 floor
-        reduced = 20000
+    # Partial: reduced = full_limit * (high - magi) / (high - low), rounded UP
+    # to the nearest $10, then floored to $200 if positive. Done in the integer
+    # domain (no float) so a value exactly on a $10 boundary never rounds up an
+    # extra $10 from floating-point representation error.
+    numerator = full_limit * (high - magi_minor)  # exact integer (cents²-scaled)
+    denom_10 = (high - low) * ROTH_ROUND_MINOR  # denominator x $10 step
+    units = -(-numerator // denom_10)  # ceil division (ints)
+    reduced = units * ROTH_ROUND_MINOR
+    if 0 < reduced < ROTH_FLOOR_MINOR:
+        reduced = ROTH_FLOOR_MINOR
     return {
         "status": "partial",
-        "roth_limit_minor": int(reduced),
+        "roth_limit_minor": reduced,
         "band_low_minor": low,
         "band_high_minor": high,
     }
