@@ -89,6 +89,31 @@ Then ask analytical questions via `/homefinance:analyze`:
 > What subscriptions am I paying, and what's due next?
 > Any unusual spending last month?
 
+## Retirement headroom
+
+Declare your retirement profile once in `~/.homefinance/config.toml`:
+
+```toml
+[retirement]
+birth_year    = 1985
+filing_status = "single"
+magi_minor    = 14000000        # MAGI in cents ($140,000)
+hsa_coverage  = "family"
+
+[retirement.contributed]        # already contributed this tax year, in cents
+traditional_ira_minor = 200000
+roth_ira_minor        = 100000
+hsa_minor             = 300000
+```
+
+Then:
+
+```bash
+homefinance retirement summary --tax-year 2025
+```
+
+It shows each account's limit, what you've contributed, remaining headroom, Roth eligibility, and the deadline — with an *informational only, not advice* disclaimer. From Claude Code, `/homefinance:retirement` does the same conversationally and helps set up the profile.
+
 ## Day-to-day
 
 - `homefinance sync` — re-sync from YNAB (cron-able)

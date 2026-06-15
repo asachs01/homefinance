@@ -33,10 +33,15 @@ src/homefinance/
 │   ├── cashflow.py     # inflow/outflow/net per period (transfers excluded)
 │   ├── recurring.py    # median-gap cadence detection + next-occurrence forecast
 │   └── anomaly.py      # category-month z-score baseline
+├── retirement/         # SP4 tax-advantaged overlay (pure, deterministic; no DB, no new deps)
+│   ├── data/irs_limits.toml # year-keyed, cited IRS limits + Roth MAGI bands
+│   ├── limits.py            # fail-loud loader (unknown year → error, never a guess)
+│   ├── inputs.py            # [retirement] config parsing (Pydantic)
+│   └── compute.py           # shared-IRA headroom, Roth phase-out, HSA, deadline, opportunities
 ├── mcp_server/
 │   ├── __main__.py     # stdio entry; FastMCP tool registrations
 │   └── tools.py        # tool implementations as plain functions (testable)
-└── cli.py              # typer + rich CLI (init / sync / status / ynab / accounts / ingest / categorize)
+└── cli.py              # typer + rich CLI (init / sync / status / ynab / accounts / ingest / categorize / retirement)
 ```
 
 ## Three invariants
@@ -71,10 +76,14 @@ Statement parses don't go straight into the canonical store. Pipeline:
 
 The canonical category vocabulary *is* the set of YNAB category names. `apply_categorization` is idempotent: it derives YNAB rows' categories from their names, fills statement rows from ordered rules, and never clobbers manual assignments (`category_source='manual'`). Analytics group by `canonical_category` for cross-source views. Claude assists only the unmatched long tail at the skill layer — every runtime money path stays deterministic. Cash-flow, recurring detection, and anomaly detection are pure SQL + stdlib arithmetic (no numpy/pandas).
 
+## Retirement overlay (SP4)
+
+SP4 doesn't read the transaction store — it's an overlay fed by a bundled, cited per-year IRS-limits file plus a `[retirement]` config section. It computes deterministic facts: contribution headroom (the IRA limit is one shared Traditional+Roth bucket), Roth MAGI phase-out eligibility, HSA caps, and the contribution deadline. Every output is informational, carries a disclaimer, and never prescribes. Unknown tax years fail loud rather than guess; the data file is the single, citable correction point for new years.
+
 ## Tools vs skills
 
-- **Tools** (21 read/analysis tools) are primitives. They live in code and ship with the package.
-- **Skills** (`homefinance-setup`, `homefinance-explore`, `homefinance-import-statement`, `homefinance-categorize`, `homefinance-analyze`) are workflows. They live in `plugin/skills/` as markdown and can be edited by users without code changes.
+- **Tools** (24 read/analysis tools) are primitives. They live in code and ship with the package.
+- **Skills** (`homefinance-setup`, `homefinance-explore`, `homefinance-import-statement`, `homefinance-categorize`, `homefinance-analyze`, `homefinance-retirement`) are workflows. They live in `plugin/skills/` as markdown and can be edited by users without code changes.
 
 ## See also
 

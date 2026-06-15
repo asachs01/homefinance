@@ -376,3 +376,77 @@ def test_mcp_set_transaction_category(synced_store: Store) -> None:
         synced_store, transaction_id=txn_id, canonical_category="Groceries"
     )
     assert result["category_source"] == "manual"
+
+
+def test_mcp_contribution_limits_2025() -> None:
+    from homefinance.mcp_server.tools import contribution_limits as mcp_contribution_limits
+
+    out = mcp_contribution_limits(tax_year=2025)
+    assert out["ira_limit_minor"] == 700000
+    assert "disclaimer" in out
+    assert "source" in out
+
+
+def test_mcp_contribution_limits_unknown_year_returns_error() -> None:
+    from homefinance.mcp_server.tools import contribution_limits as mcp_contribution_limits
+
+    out = mcp_contribution_limits(tax_year=1999)
+    assert out["error"] == "no_limit_data"
+
+
+def test_mcp_roth_eligibility_partial() -> None:
+    from homefinance.mcp_server.tools import roth_eligibility as mcp_roth_eligibility
+
+    out = mcp_roth_eligibility(tax_year=2025, filing_status="single", magi_minor=15750000, age=40)
+    assert out["status"] == "partial"
+    assert out["roth_limit_minor"] == 350000
+    assert "disclaimer" in out
+
+
+def test_mcp_retirement_summary_from_config() -> None:
+    from homefinance.mcp_server.tools import retirement_summary as mcp_retirement_summary
+
+    cfg = {
+        "birth_year": 1985,
+        "filing_status": "single",
+        "magi_minor": 14000000,
+        "hsa_coverage": "family",
+        "contributed": {
+            "traditional_ira_minor": 200000,
+            "roth_ira_minor": 100000,
+            "hsa_minor": 300000,
+        },
+    }
+    out = mcp_retirement_summary(tax_year=2025, retirement_cfg=cfg)
+    assert out["ira"]["remaining_minor"] == 400000  # $7,000 - $3,000
+    assert out["roth"]["status"] == "full"  # MAGI $140k < $150k band
+    assert out["hsa"]["remaining_minor"] == 555000  # $8,550 - $3,000
+    assert any(o["account"] == "ira" for o in out["opportunities"])
+    assert out["deadline"] == "2026-04-15"
+    assert "disclaimer" in out
+
+
+def test_mcp_retirement_summary_no_config_returns_friendly_message() -> None:
+    from homefinance.mcp_server.tools import retirement_summary as mcp_retirement_summary
+
+    out = mcp_retirement_summary(tax_year=2025, retirement_cfg=None)
+    assert "configure" in out["message"].lower()
+
+
+def test_mcp_roth_eligibility_invalid_filing_status_returns_error() -> None:
+    from homefinance.mcp_server.tools import roth_eligibility as mcp_roth_eligibility
+
+    out = mcp_roth_eligibility(tax_year=2025, filing_status="married", magi_minor=15000000, age=40)
+    assert out["error"] == "invalid_filing_status"
+    assert "filing_status" in out["message"]
+
+
+def test_mcp_retirement_summary_malformed_config_returns_error() -> None:
+    from homefinance.mcp_server.tools import retirement_summary as mcp_retirement_summary
+
+    # Unknown key in [retirement] (extra="forbid") must surface a structured
+    # error dict, not propagate a raw pydantic.ValidationError.
+    out = mcp_retirement_summary(
+        tax_year=2025, retirement_cfg={"birth_year": 1985, "fyling_status": "single"}
+    )
+    assert out["error"] == "invalid_config"
