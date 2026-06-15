@@ -1,7 +1,9 @@
 from homefinance.retirement.compute import (
     DISCLAIMER,
     contribution_deadline,
+    hsa_headroom,
     ira_headroom,
+    opportunities,
     roth_eligibility,
 )
 from homefinance.retirement.limits import load_limits
@@ -117,3 +119,43 @@ def test_roth_partial_fractional_rounds_up_to_next_10() -> None:
     # rounds UP to $4,130.
     out = roth_eligibility(filing_status="single", magi_minor=15616000, age=40, limits=lim)
     assert out["roth_limit_minor"] == 413000  # rounded up from $4,125.33 → $4,130
+
+
+def test_hsa_self_only_under_55() -> None:
+    lim = load_limits(2025)
+    out = hsa_headroom(age=40, hsa_coverage="self_only", hsa_contributed_minor=100000, limits=lim)
+    assert out is not None
+    assert out["limit_minor"] == 430000  # $4,300
+    assert out["catchup_applied_minor"] == 0
+    assert out["remaining_minor"] == 330000  # $3,300 left
+
+
+def test_hsa_family_with_catchup_at_55() -> None:
+    lim = load_limits(2025)
+    out = hsa_headroom(age=60, hsa_coverage="family", hsa_contributed_minor=0, limits=lim)
+    assert out is not None
+    assert out["limit_minor"] == 955000  # $8,550 + $1,000 catch-up
+    assert out["catchup_applied_minor"] == 100000
+
+
+def test_hsa_none_when_no_coverage() -> None:
+    lim = load_limits(2025)
+    assert hsa_headroom(age=40, hsa_coverage=None, hsa_contributed_minor=0, limits=lim) is None
+
+
+def test_opportunities_flags_unused_headroom_with_deadline() -> None:
+    lim = load_limits(2025)
+    ira = ira_headroom(age=40, trad_contributed_minor=0, roth_contributed_minor=0, limits=lim)
+    hsa = hsa_headroom(age=40, hsa_coverage="family", hsa_contributed_minor=0, limits=lim)
+    opps = opportunities(tax_year=2025, ira=ira, hsa=hsa)
+    accounts = {o["account"] for o in opps}
+    assert "ira" in accounts and "hsa" in accounts
+    assert all(o["deadline"] == "2026-04-15" for o in opps)
+    assert all(o["remaining_minor"] > 0 for o in opps)
+
+
+def test_opportunities_empty_when_maxed() -> None:
+    lim = load_limits(2025)
+    ira = ira_headroom(age=40, trad_contributed_minor=700000, roth_contributed_minor=0, limits=lim)
+    opps = opportunities(tax_year=2025, ira=ira, hsa=None)
+    assert opps == []

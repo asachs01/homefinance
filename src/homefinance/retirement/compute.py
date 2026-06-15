@@ -110,3 +110,48 @@ def roth_eligibility(
         "band_low_minor": low,
         "band_high_minor": high,
     }
+
+
+def hsa_headroom(
+    *,
+    age: int,
+    hsa_coverage: str | None,
+    hsa_contributed_minor: int,
+    limits: dict[str, Any],
+) -> dict[str, Any] | None:
+    """HSA headroom for self-only or family coverage, or None if no HSA configured."""
+    if hsa_coverage == "self_only":
+        cap = limits["hsa_self_only_minor"]
+    elif hsa_coverage == "family":
+        cap = limits["hsa_family_minor"]
+    else:
+        return None
+    catchup = limits["hsa_catchup_minor"] if age >= limits["hsa_catchup_age"] else 0
+    limit = cap + catchup
+    return {
+        "coverage": hsa_coverage,
+        "limit_minor": limit,
+        "catchup_applied_minor": catchup,
+        "contributed_minor": hsa_contributed_minor,
+        "remaining_minor": max(0, limit - hsa_contributed_minor),
+    }
+
+
+def opportunities(
+    *,
+    tax_year: int,
+    ira: dict[str, Any],
+    hsa: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Flag accounts with unused headroom, each tagged with the contribution deadline."""
+    deadline = contribution_deadline(tax_year)
+    out: list[dict[str, Any]] = []
+    if ira["remaining_minor"] > 0:
+        out.append(
+            {"account": "ira", "remaining_minor": ira["remaining_minor"], "deadline": deadline}
+        )
+    if hsa is not None and hsa["remaining_minor"] > 0:
+        out.append(
+            {"account": "hsa", "remaining_minor": hsa["remaining_minor"], "deadline": deadline}
+        )
+    return out
