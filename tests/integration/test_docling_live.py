@@ -49,4 +49,5 @@ def test_docling_pdf_parser_real_path_against_bundled_sample(tmp_path: Path) -> 
     }
     parsed = DoclingPDFParser.parse(sample, account, template)
     assert parsed.source_format == "docling_pdf"
-    assert len(parsed.transactions) >= 0
+    # Shape check only — content depends on the maintainer-supplied sample.
+    assert isinstance(parsed.transactions, tuple)

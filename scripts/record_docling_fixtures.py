@@ -16,6 +16,10 @@ import json
 import sys
 from pathlib import Path
 
+# Column indices to preserve verbatim; all others are replaced with placeholders.
+# Matches the default docling_pdf template's columns (date, amount).
+KEEP_COLUMNS = (0, 2)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -24,7 +28,9 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        from docling.document_converter import DocumentConverter  # type: ignore[import-not-found]
+        from homefinance.sources.statement.parsers.docling_pdf import (
+            _extract_cells_with_docling,
+        )
     except ImportError:
         print(
             "error: docling is required. Install with: pip install 'homefinance[ingest]'",
@@ -33,25 +39,15 @@ def main() -> int:
         return 2
 
     args.out.mkdir(parents=True, exist_ok=True)
-    converter = DocumentConverter()
-    result = converter.convert(str(args.pdf))
+    cells = _extract_cells_with_docling(args.pdf)
 
-    table = next(iter(result.document.tables or []), None)
-    cells = {
-        "statement_period_start": None,
-        "statement_period_end": None,
-        "opening_balance_minor": None,
-        "closing_balance_minor": None,
-        "table": {
-            "header": [c.text for c in (table.header or [])] if table else [],
-            "rows": [
-                [f"[scrubbed col {i}]" if i not in (0, 2) else c.text for i, c in enumerate(r)]
-                for r in (table.rows or [])
-            ]
-            if table
-            else [],
-        },
-    }
+    # Scrub on top of the extractor's output so the script can't drift from
+    # the parser's actual cells.json contract.
+    rows = cells["table"]["rows"]
+    cells["table"]["rows"] = [
+        [cell if i in KEEP_COLUMNS else f"[scrubbed col {i}]" for i, cell in enumerate(row)]
+        for row in rows
+    ]
 
     out_file = args.out / "cells.json"
     out_file.write_text(json.dumps(cells, indent=2, sort_keys=True))
