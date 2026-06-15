@@ -78,12 +78,14 @@ def query_transactions(
     amount_max_minor: int | None = None,
     cleared: str | None = None,
     include_deleted: bool = False,
+    include_pending: bool = False,
     mode: str = "leaves",
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict]:  # type: ignore[type-arg]
     """List transactions. ``mode='leaves'`` (default) gives the analysis view;
-    ``mode='tops'`` gives the user-facing 'one transaction per split' view."""
+    ``mode='tops'`` gives the user-facing 'one transaction per split' view.
+    ``include_pending=True`` includes statement rows awaiting review."""
     return _tools.query_transactions(
         _store_cached(),
         source_id=source_id,
@@ -96,6 +98,7 @@ def query_transactions(
         amount_max_minor=amount_max_minor,
         cleared=cleared,
         include_deleted=include_deleted,
+        include_pending=include_pending,
         mode=mode,  # type: ignore[arg-type]
         limit=limit,
         offset=offset,

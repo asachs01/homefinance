@@ -175,3 +175,74 @@ def test_sync_ynab_all_runs_for_each_budget(store: Store, tiny_fixtures_dir: Pat
     assert results[0]["status"] == "success"
     assert results[0]["source_id"] == "ynab:budget-tiny"
     assert "reconciliation" in results[0]
+
+
+from homefinance.sources.statement.ingest import (  # noqa: E402
+    confirm_batch,
+    ingest_file,
+    register_account,
+)
+
+
+def _stage_pending_csv(store, tmp_path, tiny_fixtures_dir):
+    """Helper: register an account and stage a pending CSV batch."""
+    register_account(store, nickname="citi-cc", type="credit_card", currency="USD")
+    config_dir = tmp_path / "homefinance"
+    (config_dir / "templates").mkdir(parents=True)
+    (config_dir / "templates" / "statement:citi-cc.toml").write_text(
+        'parser = "csv"\n[columns]\n'
+        'date = "Transaction Date"\namount = "Amount"\npayee = "Description"\nmemo = "Notes"\n'
+        "[options]\n"
+        'date_format = "%m/%d/%Y"\nsign = "natural"\n'
+    )
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "statement"
+    return ingest_file(
+        store,
+        path=fixture_root / "tiny.csv",
+        account_nickname="citi-cc",
+        config_dir=config_dir,
+        archive_dir=tmp_path / "archive",
+    )
+
+
+def test_query_transactions_excludes_pending_by_default(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    rows = query_transactions(synced_store)
+    # YNAB rows are present; statement pending rows should not be.
+    statuses = {r.get("status", "confirmed") for r in rows}
+    assert statuses == {"confirmed"} or all(r.get("status") != "pending_review" for r in rows)
+
+
+def test_query_transactions_includes_pending_when_opted_in(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    confirmed_only = query_transactions(synced_store)
+    with_pending = query_transactions(synced_store, include_pending=True)
+    assert len(with_pending) > len(confirmed_only)
+
+
+def test_summarize_spending_always_excludes_pending(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    preview = _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    before_total = sum(
+        r["total_minor"] for r in summarize_spending(synced_store, group_by="account")
+    )
+    confirm_batch(synced_store, preview.batch_id)
+    after_total = sum(
+        r["total_minor"] for r in summarize_spending(synced_store, group_by="account")
+    )
+    assert after_total != before_total
+
+
+def test_get_sync_status_includes_pending_batch_count(
+    synced_store: Store, tmp_path: Path, tiny_fixtures_dir: Path
+) -> None:
+    _stage_pending_csv(synced_store, tmp_path, tiny_fixtures_dir)
+    statuses = get_sync_status(synced_store)
+    by_id = {s["source_id"]: s for s in statuses}
+    assert "pending_batch_count" in by_id["statement:citi-cc"]
+    assert by_id["statement:citi-cc"]["pending_batch_count"] == 1

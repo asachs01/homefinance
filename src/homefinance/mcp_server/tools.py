@@ -113,6 +113,7 @@ def query_transactions(
     amount_max_minor: int | None = None,
     cleared: str | None = None,
     include_deleted: bool = False,
+    include_pending: bool = False,
     mode: Mode = "leaves",
     limit: int = 200,
     offset: int = 0,
@@ -121,6 +122,9 @@ def query_transactions(
     children (analysis view, correct category attribution).
     ``mode='tops'`` = non-split rows + split parents (user-facing view).
     Both views sum to the same total — see spec §6.3.
+
+    ``include_pending=False`` (default) hides statement rows still awaiting
+    review (status='pending_review'); opt in to see them.
     """
     where: list[str] = []
     params: list[Any] = []
@@ -132,6 +136,8 @@ def query_transactions(
     else:
         raise ValueError(f"invalid mode: {mode!r}")
 
+    if not include_pending:
+        where.append("status = 'confirmed'")
     if not include_deleted:
         where.append("deleted = 0")
     if source_id is not None:
@@ -165,7 +171,8 @@ def query_transactions(
     sql = (
         "SELECT id, source_id, external_id, account_id, date, amount_minor, "
         "currency, payee, memo, category_id, cleared, approved, flag_color, "
-        "import_id, transfer_account_id, parent_id, is_split_parent, deleted "
+        "import_id, transfer_account_id, parent_id, is_split_parent, deleted, "
+        "status, batch_id "
         "FROM transactions WHERE "
         + " AND ".join(where)
         + " ORDER BY date DESC, id LIMIT ? OFFSET ?"
@@ -207,7 +214,7 @@ def summarize_spending(
     if expr is None:
         raise ValueError(f"invalid group_by: {group_by!r}")
 
-    where: list[str] = ["t.is_split_parent = 0", "t.deleted = 0"]
+    where: list[str] = ["t.is_split_parent = 0", "t.deleted = 0", "t.status = 'confirmed'"]
     params: list[Any] = []
 
     if source_id is not None:
@@ -255,7 +262,10 @@ def get_sync_status(store: Store) -> list[dict[str, Any]]:
         "(SELECT reconciliation FROM sync_runs WHERE source_id = s.id "
         " ORDER BY id DESC LIMIT 1) AS last_reconciliation, "
         "(SELECT drift_report FROM sync_runs WHERE source_id = s.id "
-        " ORDER BY id DESC LIMIT 1) AS last_drift_report "
+        " ORDER BY id DESC LIMIT 1) AS last_drift_report, "
+        "(SELECT COUNT(*) FROM statement_batches "
+        "  WHERE source_id = s.id AND review_status = 'pending') "
+        "  AS pending_batch_count "
         "FROM sources s LEFT JOIN sync_state ss ON ss.source_id = s.id "
         "ORDER BY s.id"
     ).fetchall()
@@ -277,6 +287,7 @@ def get_sync_status(store: Store) -> list[dict[str, Any]]:
                 "server_knowledge": r["server_knowledge"],
                 "last_reconciliation": r["last_reconciliation"],
                 "drift_account_count": drift_count,
+                "pending_batch_count": int(r["pending_batch_count"] or 0),
             }
         )
     return out
